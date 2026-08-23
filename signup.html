@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Campusly — Sign Up</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="signup">
+  <section class="login-screen signup-screen-page">
+    <div class="login-visual">
+      <div class="login-top"><a class="brand brand-light" href="index.html">CAMPUSLY<span>.</span></a><span class="eyebrow">CREATE YOUR SPACE</span></div>
+      <div class="visual-copy"><p class="eyebrow">CAMPUS / COMMUNITY / CREATE</p><h1>Your next<br><em>experience.</em></h1><p>Set up your account once, then keep every campus event, pass and achievement in one place.</p></div>
+      <div class="floating-stat stat-one"><strong>QR</strong><span>smart event passes</span></div>
+      <div class="floating-stat stat-two"><strong>24/7</strong><span>campus activity</span></div>
+      <div class="visual-orbit"><span>PASS</span><span>EVENTS</span><span>WALLET</span><span>PROFILE</span></div>
+    </div>
+    <div class="login-panel">
+      <div class="mobile-brand"><a class="brand" href="index.html">CAMPUSLY<span>.</span></a></div>
+      <div class="signup-back"><a href="index.html">← Back to sign in</a></div>
+      <div class="login-heading signup-heading"><p class="eyebrow">JOIN CAMPUSLY</p><h2>Create your<br><span>account.</span></h2><p>Choose your role and set up your student or organiser profile.</p></div>
+      <form id="signupForm" class="signup-form" onsubmit="signupUser(event)">
+        <div class="signup-provider-row"><button type="button" class="google-btn" onclick="demoGoogleSignup()"><span class="google-mark">G</span> Continue with Google</button><div class="signup-divider"><span>or continue with email</span></div></div>
+        <div class="signup-grid">
+          <label class="signup-field"><span>Full name</span><input id="signupName" required autocomplete="name" placeholder="Your name"></label>
+          <label class="signup-field"><span>Email</span><input id="signupEmail" required type="email" autocomplete="email" placeholder="you@college.edu"></label>
+          <label class="signup-field full"><span>College / University</span><input id="signupCollege" required placeholder="Your college"></label>
+          <label class="signup-field full"><span>Continue as</span><select id="signupRole"><option value="attendee">Attendee / Student</option><option value="organiser">Organiser</option></select></label>
+        </div>
+        <button class="btn btn-dark signup-submit" type="submit">Create account <span>→</span></button>
+        <p class="signup-note">Demo signup — no password or backend required.</p>
+      </form>
+    </div>
+  </section>
+  <script src="script.js"></script>
+</body>
+</html>

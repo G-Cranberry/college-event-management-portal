@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Campusly — Sign In</title>
+  <meta name="description" content="Campusly college event management portal.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="login">
+  <div id="loadingScreen" class="loading-screen" aria-hidden="true">
+    <div class="loading-orbit loading-orbit-one"></div>
+    <div class="loading-orbit loading-orbit-two"></div>
+    <div class="loading-card">
+      <div class="loading-mark">C<span>.</span></div>
+      <p class="eyebrow">CAMPUSLY</p>
+      <h1>Loading your<br><em>campus.</em></h1>
+      <div class="loading-line"><span></span></div>
+      <small>Preparing your events & passes</small>
+    </div>
+  </div>
+
+  <section id="loginScreen" class="login-screen">
+    <div class="login-visual">
+      <div class="login-top">
+        <a class="brand brand-light" href="index.html">CAMPUSLY<span>.</span></a>
+        <span class="eyebrow">COLLEGE EVENT PLATFORM</span>
+      </div>
+      <div class="visual-copy">
+        <p class="eyebrow">ONE PLACE. EVERY EVENT.</p>
+        <h1>Make campus<br><em>feel alive.</em></h1>
+        <p>Discover events, join communities, find a ride and keep every achievement in one beautiful place.</p>
+      </div>
+      <div class="floating-stat stat-one"><strong>48</strong><span>events this month</span></div>
+      <div class="floating-stat stat-two"><strong>2.4k</strong><span>active attendees</span></div>
+      <div class="visual-orbit"><span>TECH</span><span>CULTURE</span><span>SPORTS</span><span>ART</span></div>
+    </div>
+
+    <div class="login-panel">
+      <div class="mobile-brand"><a class="brand" href="index.html">CAMPUSLY<span>.</span></a></div>
+      <div class="login-heading">
+        <p class="eyebrow">WELCOME BACK</p>
+        <h2>Choose your<br><span>experience.</span></h2>
+        <p>Continue as an organiser or attendee.</p>
+      </div>
+      <div class="role-cards">
+        <button class="role-card" onclick="window.location.href='signup.html?role=attendee'">
+          <div class="role-icon">↗</div><div><span class="role-label">ATTENDEE</span><h3>Explore & participate</h3><p>Find events, register, travel and collect certificates.</p></div><span class="role-arrow">→</span>
+        </button>
+        <button class="role-card" onclick="window.location.href='signup.html?role=organiser'">
+          <div class="role-icon organiser-icon">✦</div><div><span class="role-label">ORGANISER</span><h3>Create & manage</h3><p>Publish events, manage participants and issue certificates.</p></div><span class="role-arrow">→</span>
+        </button>
+      </div>
+      <div class="auth-switch"><span>New to Campusly?</span><button type="button" onclick="window.location.href='signup.html'">Create an account</button></div>
+      <p class="login-note">Demo portal · no password required</p>
+    </div>
+  </section>
+  <script src="script.js"></script>
+</body>
+</html>

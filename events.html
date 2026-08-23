@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Campusly — Events</title>
+<meta name="description" content="Campusly college event management portal.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-page="events">
+<div id="loadingScreen" class="loading-screen is-hidden" aria-hidden="true"><div class="loading-orbit loading-orbit-one"></div><div class="loading-orbit loading-orbit-two"></div><div class="loading-card"><div class="loading-mark">C<span>.</span></div><p class="eyebrow">CAMPUSLY</p><h1>Loading your<br><em>campus.</em></h1><div class="loading-line"><span></span></div><small>Preparing your events & passes</small></div></div>
+<div id="app" class="app">
+<div class="ambient ambient-one"></div><div class="ambient ambient-two"></div><div id="cursorGlow" class="cursor-glow"></div><div class="bg-grid" aria-hidden="true"></div><div class="bg-orb bg-orb-one" aria-hidden="true"></div><div class="bg-orb bg-orb-two" aria-hidden="true"></div><div class="bg-orb bg-orb-three" aria-hidden="true"></div><div class="bg-particles" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="pinterest-bg" aria-hidden="true"><div class="pin-blob pin-blob-a"></div><div class="pin-blob pin-blob-b"></div><div class="pin-blob pin-blob-c"></div><div class="pin-arc pin-arc-a"></div><div class="pin-arc pin-arc-b"></div><div class="pin-note pin-note-a"><span>DISCOVER</span><b>new ideas</b></div><div class="pin-note pin-note-b"><span>EVENTS</span><b>make memories</b></div><div class="pin-note pin-note-c"><span>CAMPUSLY</span><b>one place.</b></div><div class="pin-dot pin-dot-a"></div><div class="pin-dot pin-dot-b"></div><div class="pin-dot pin-dot-c"></div></div><div class="scroll-progress" id="scrollProgress"></div>
+<header class="navbar">
+  <a class="brand" href="home.html">CAMPUSLY<span>.</span></a>
+  <nav id="mainNav" class="main-nav">
+    <a data-page="home" href="home.html">Home</a>
+    <a data-page="events" href="events.html">Events</a>
+    <a data-page="transport" href="transport.html">Transport</a>
+    <a data-page="wallet" href="wallet.html">Wallet</a>
+    <a data-page="gallery" href="gallery.html">Gallery</a>
+    <a data-page="scanner" class="organiser-only" href="scanner.html">Scanner</a>
+    <a data-page="registrations" class="attendee-only" href="registrations.html">My Registrations</a>
+    <a data-page="create" class="organiser-only" href="create.html">Create Event</a>
+    <a data-page="manage" class="organiser-only" href="manage.html">Manage</a>
+  </nav>
+  <div class="nav-actions">
+    <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"><span class="theme-icon">☾</span><span class="theme-text">Dark</span></button>
+    <button class="notification-btn" onclick="showToast('You are all caught up.')">○<span></span></button>
+    <div class="profile-chip" onclick="toggleProfileMenu()"><div id="profileAvatar" class="avatar">A</div><div class="profile-name"><strong id="profileName">Aarav</strong><small id="profileRole">ATTENDEE</small></div><span>⌄</span></div>
+    <div id="profileMenu" class="profile-menu"><a href="profile.html">Profile</a><button onclick="logout()">Log out</button></div>
+  </div>
+</header>
+<main id="pageContent"></main>
+<footer class="footer"><div><a class="brand" href="home.html">CAMPUSLY<span>.</span></a><p>One campus. Endless experiences.</p></div><div class="footer-links"><a href="events.html">Events</a><a href="transport.html">Transport</a><a href="wallet.html">Wallet</a><a href="gallery.html">Gallery</a><a href="profile.html">Profile</a></div><small>© 2026 Campusly</small></footer>
+<div class="radial-nav" id="radialNav">
+  <div class="nav-backdrop" data-nav-close></div>
+  <div class="radial-orbit" aria-label="Radial navigation">
+    <div class="radial-ring">
+      <a href="home.html" class="radial-link" data-nav-index="0" aria-label="Home"><span class="radial-icon">⌂</span><span class="radial-label">Home</span></a>
+      <a href="events.html" class="radial-link" data-nav-index="1" aria-label="Events"><span class="radial-icon">▦</span><span class="radial-label">Events</span></a>
+      <a href="transport.html" class="radial-link" data-nav-index="2" aria-label="Transport"><span class="radial-icon">⇄</span><span class="radial-label">Transport</span></a>
+      <a href="wallet.html" class="radial-link" data-nav-index="3" aria-label="Wallet"><span class="radial-icon">▤</span><span class="radial-label">Wallet</span></a>
+      <a href="gallery.html" class="radial-link" data-nav-index="4" aria-label="Gallery"><span class="radial-icon">▧</span><span class="radial-label">Gallery</span></a>
+      <a href="registrations.html" class="radial-link attendee-only" data-nav-index="5" aria-label="My Registrations"><span class="radial-icon">◒</span><span class="radial-label">My Registrations</span></a>
+      <a href="scanner.html" class="radial-link organiser-only" data-nav-index="6" aria-label="Scanner"><span class="radial-icon">⌁</span><span class="radial-label">Scanner</span></a>
+      <a href="create.html" class="radial-link organiser-only" data-nav-index="7" aria-label="Create Event"><span class="radial-icon">＋</span><span class="radial-label">Create Event</span></a>
+      <a href="manage.html" class="radial-link organiser-only" data-nav-index="8" aria-label="Manage"><span class="radial-icon">☷</span><span class="radial-label">Manage</span></a>
+      <a href="profile.html" class="radial-link" data-nav-index="9" aria-label="Profile"><span class="radial-icon">◯</span><span class="radial-label">Profile</span></a>
+      <a href="certificates.html" class="radial-link" data-nav-index="10" aria-label="Certificates"><span class="radial-icon">✦</span><span class="radial-label">Certificates</span></a>
+    </div>
+    <button class="radial-toggle" type="button" onclick="toggleRadialNav()" aria-label="Open navigation" aria-expanded="false">⌁</button>
+  </div>
+</div>
+<div id="modal" class="modal hidden" onclick="closeModal(event)"><div class="modal-card" onclick="event.stopPropagation()"><button class="modal-close" onclick="closeModal()">×</button><div id="modalContent"></div></div></div><div id="toast" class="toast"></div>
+<script src="script.js"></script>
+</body>
+</html>
