@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Campusly — College Event Management</title>
+  <meta name="description" content="Campusly is a modern college event management portal for organisers and event attendees.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="loadingScreen" class="loading-screen" aria-hidden="false">
+    <div class="loading-orbit loading-orbit-one"></div>
+    <div class="loading-orbit loading-orbit-two"></div>
+    <div class="loading-card">
+      <div class="loading-mark">C<span>.</span></div>
+      <p class="eyebrow">CAMPUSLY</p>
+      <h1>Loading your<br><em>campus.</em></h1>
+      <div class="loading-line"><span></span></div>
+      <small>Preparing your events & passes</small>
+    </div>
+  </div>
+
+
+  <!-- LOGIN SCREEN -->
+  <section id="loginScreen" class="login-screen">
+    <div class="login-visual">
+      <div class="login-top">
+        <a class="brand brand-light" href="#" onclick="showLogin()">CAMPUSLY<span>.</span></a>
+        <span class="eyebrow">COLLEGE EVENT PLATFORM</span>
+      </div>
+
+      <div class="visual-copy">
+        <p class="eyebrow">ONE PLACE. EVERY EVENT.</p>
+        <h1>Make campus<br><em>feel alive.</em></h1>
+        <p>Discover events, join communities, find a ride and keep every achievement in one beautiful place.</p>
+      </div>
+
+      <div class="floating-stat stat-one">
+        <strong>48</strong>
+        <span>events this month</span>
+      </div>
+      <div class="floating-stat stat-two">
+        <strong>2.4k</strong>
+        <span>active attendees</span>
+      </div>
+
+      <div class="visual-orbit">
+        <span>TECH</span>
+        <span>CULTURE</span>
+        <span>SPORTS</span>
+        <span>ART</span>
+      </div>
+    </div>
+
+    <div class="login-panel">
+      <div class="mobile-brand">
+        <a class="brand" href="#" onclick="showLogin()">CAMPUSLY<span>.</span></a>
+      </div>
+
+      <div class="login-heading">
+        <p class="eyebrow">WELCOME BACK</p>
+        <h2>Choose your<br><span>experience.</span></h2>
+        <p>Continue as an organiser or attendee.</p>
+      </div>
+
+      <div class="role-cards">
+        <button class="role-card" onclick="showSignup('attendee')">
+          <div class="role-icon">↗</div>
+          <div>
+            <span class="role-label">ATTENDEE</span>
+            <h3>Explore & participate</h3>
+            <p>Find events, register, travel and collect certificates.</p>
+          </div>
+          <span class="role-arrow">→</span>
+        </button>
+
+        <button class="role-card" onclick="showSignup('organiser')">
+          <div class="role-icon organiser-icon">✦</div>
+          <div>
+            <span class="role-label">ORGANISER</span>
+            <h3>Create & manage</h3>
+            <p>Publish events, manage participants and issue certificates.</p>
+          </div>
+          <span class="role-arrow">→</span>
+        </button>
+      </div>
+
+      <div class="auth-switch">
+        <span>New to Campusly?</span>
+        <button type="button" onclick="showSignup()">Create an account</button>
+      </div>
+      <p class="login-note">Demo portal · no password required</p>
+
+      <form id="signupForm" class="signup-form hidden" onsubmit="signupUser(event)">
+        <div class="signup-back">
+          <button type="button" onclick="showLogin()">← Back to sign in</button>
+        </div>
+        <div class="login-heading signup-heading">
+          <p class="eyebrow">JOIN CAMPUSLY</p>
+          <h2>Create your<br><span>account.</span></h2>
+          <p>Set up your student profile and start exploring campus events.</p>
+        </div>
+        <div class="signup-provider-row"><button type="button" class="google-btn" onclick="demoGoogleSignup()"><span class="google-mark">G</span> Continue with Google</button><div class="signup-divider"><span>or continue with email</span></div></div>
+        <div class="signup-grid">
+          <label class="signup-field">
+            <span>Full name</span>
+            <input id="signupName" required autocomplete="name" placeholder="Your name">
+          </label>
+          <label class="signup-field">
+            <span>Email</span>
+            <input id="signupEmail" required type="email" autocomplete="email" placeholder="you@college.edu">
+          </label>
+          <label class="signup-field full">
+            <span>College / University</span>
+            <input id="signupCollege" required placeholder="Your college">
+          </label>
+          <label class="signup-field full">
+            <span>Continue as</span>
+            <select id="signupRole">
+              <option value="attendee">Attendee / Student</option>
+              <option value="organiser">Organiser</option>
+            </select>
+          </label>
+        </div>
+        <button class="btn btn-dark signup-submit" type="submit">Create account <span>→</span></button>
+        <p class="signup-note">Demo signup — no password or backend required.</p>
+      </form>
+    </div>
+  </section>
+
+  <!-- APPLICATION -->
+  <div id="app" class="app hidden">
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+    <div id="cursorGlow" class="cursor-glow"></div>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <div class="bg-orb bg-orb-one" aria-hidden="true"></div>
+    <div class="bg-orb bg-orb-two" aria-hidden="true"></div>
+    <div class="bg-orb bg-orb-three" aria-hidden="true"></div>
+    <div class="bg-particles" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="pinterest-bg" aria-hidden="true">
+      <div class="pin-blob pin-blob-a"></div>
+      <div class="pin-blob pin-blob-b"></div>
+      <div class="pin-blob pin-blob-c"></div>
+      <div class="pin-arc pin-arc-a"></div>
+      <div class="pin-arc pin-arc-b"></div>
+      <div class="pin-note pin-note-a"><span>DISCOVER</span><b>new ideas</b></div>
+      <div class="pin-note pin-note-b"><span>EVENTS</span><b>make memories</b></div>
+      <div class="pin-note pin-note-c"><span>CAMPUSLY</span><b>one place.</b></div>
+      <div class="pin-dot pin-dot-a"></div><div class="pin-dot pin-dot-b"></div><div class="pin-dot pin-dot-c"></div>
+    </div>
+    <div class="scroll-progress" id="scrollProgress"></div>
+    <header class="navbar">
+      <a class="brand" href="#" onclick="navigate('home')">CAMPUSLY<span>.</span></a>
+
+      <nav id="mainNav" class="main-nav">
+        <button data-page="home" onclick="navigate('home')">Home</button>
+        <button data-page="events" onclick="navigate('events')">Events</button>
+        <button data-page="transport" onclick="navigate('transport')">Transport</button>
+        <button data-page="wallet" onclick="navigate('wallet')">Wallet</button>
+        <button data-page="gallery" onclick="navigate('gallery')">Gallery</button>
+        <button data-page="scanner" class="organiser-only" onclick="navigate('scanner')">Scanner</button>
+        <button data-page="registrations" class="attendee-only" onclick="navigate('registrations')">My Registrations</button>
+        <button data-page="create" class="organiser-only" onclick="navigate('create')">Create Event</button>
+        <button data-page="manage" class="organiser-only" onclick="navigate('manage')">Manage</button>
+      </nav>
+
+      <div class="nav-actions">
+        <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode">
+          <span class="theme-icon">☾</span>
+          <span class="theme-text">Dark</span>
+        </button>
+        <button class="notification-btn" onclick="showToast('You are all caught up.')">○<span></span></button>
+        <div class="profile-chip" onclick="toggleProfileMenu()">
+          <div id="profileAvatar" class="avatar">A</div>
+          <div class="profile-name">
+            <strong id="profileName">Aarav</strong>
+            <small id="profileRole">ATTENDEE</small>
+          </div>
+          <span>⌄</span>
+        </div>
+        <div id="profileMenu" class="profile-menu">
+          <button onclick="navigate('profile')">Profile</button>
+          <button onclick="logout()">Log out</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="pageContent"></main>
+
+    <footer class="footer">
+      <div>
+        <a class="brand" href="#" onclick="navigate('home')">CAMPUSLY<span>.</span></a>
+        <p>One campus. Endless experiences.</p>
+      </div>
+      <div class="footer-links">
+        <a href="#" onclick="navigate('events')">Events</a>
+        <a href="#" onclick="navigate('transport')">Transport</a>
+        <a href="#" onclick="navigate('wallet')">Wallet</a>
+        <a href="#" onclick="navigate('gallery')">Gallery</a>
+        <a href="#" onclick="showToast('Help centre coming soon.')">Help</a>
+      </div>
+      <small>© 2026 Campusly</small>
+    </footer>
+
+    <div class="quick-actions" aria-label="Quick navigation">
+      <button class="quick-action" type="button" onclick="navigate('home')" aria-label="Home">⌂</button>
+      <button class="quick-action" type="button" onclick="navigate('events')" aria-label="Events">▦</button>
+      <button class="quick-action" type="button" onclick="navigate('transport')" aria-label="Transport">↗</button>
+      <button class="quick-action primary" type="button" onclick="window.scrollTo({top:0, behavior:'smooth'})" aria-label="Back to top">↑</button>
+    </div>
+  </div>
+
+  <!-- MODAL -->
+  <div id="modal" class="modal hidden" onclick="closeModal(event)">
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <button class="modal-close" onclick="closeModal()">×</button>
+      <div id="modalContent"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
