@@ -43,21 +43,28 @@
       <div class="mobile-brand"><a class="brand" href="index.html">CAMPUSLY<span>.</span></a></div>
       <div class="login-heading">
         <p class="eyebrow">WELCOME BACK</p>
-        <h2>Choose your<br><span>experience.</span></h2>
-        <p>Continue as an organiser or attendee.</p>
+        <h2>Sign in to<br><span>your campus.</span></h2>
+        <p>Use your Campusly account to continue as an attendee or organiser.</p>
       </div>
-      <div class="role-cards">
-        <button class="role-card" onclick="window.location.href='signup.html?role=attendee'">
-          <div class="role-icon">↗</div><div><span class="role-label">ATTENDEE</span><h3>Explore & participate</h3><p>Find events, register, travel and collect certificates.</p></div><span class="role-arrow">→</span>
-        </button>
-        <button class="role-card" onclick="window.location.href='signup.html?role=organiser'">
-          <div class="role-icon organiser-icon">✦</div><div><span class="role-label">ORGANISER</span><h3>Create & manage</h3><p>Publish events, manage participants and issue certificates.</p></div><span class="role-arrow">→</span>
-        </button>
-      </div>
+      <form id="signinForm" class="signup-form" onsubmit="signInUser(event)" novalidate>
+        <div class="signup-provider-row">
+          <button type="button" class="google-btn" onclick="googleAuth()"><span class="google-mark">G</span> Continue with Google</button>
+          <div class="signup-divider"><span>or sign in with email</span></div>
+        </div>
+        <div class="signup-grid">
+          <label class="signup-field full"><span>Email</span><input id="signinEmail" type="email" required autocomplete="email" placeholder="you@college.edu"></label>
+          <label class="signup-field full"><span>Password</span><input id="signinPassword" type="password" required autocomplete="current-password" placeholder="Your password"></label>
+        </div>
+        <p id="authMessage" class="auth-message" role="alert" hidden></p>
+        <button class="btn btn-dark signup-submit" type="submit">Sign in <span>→</span></button>
+        <button type="button" class="auth-link" onclick="forgotPassword()">Forgot password?</button>
+      </form>
       <div class="auth-switch"><span>New to Campusly?</span><button type="button" onclick="window.location.href='signup.html'">Create an account</button></div>
-      <p class="login-note">Demo portal · no password required</p>
+      <p class="login-note" id="authModeNote"></p>
     </div>
   </section>
-  <script src="script.js"></script>
+  <script src="firebase-config.js"></script>
+<script src="auth.js"></script>
+<script src="script.js"></script>
 </body>
 </html>

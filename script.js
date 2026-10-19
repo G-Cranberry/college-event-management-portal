@@ -101,15 +101,12 @@ const defaultEvents = [
   }
 ];
 
-let events = loadData("campuslyEvents", defaultEvents);
-let registrations = loadData("campuslyRegistrations", [2, 4]);
+let events = normalizeEvents(loadData("campuslyEvents", defaultEvents));
+let registrations = loadData("campuslyRegistrations", []);
 let registrationDetails = loadData("campuslyRegistrationDetails", {});
-let certificates = loadData("campuslyCertificates", [
-  { event: "Web Development Workshop", date: "Jul 18, 2026", type: "Participation" },
-  { event: "CodeSprint 2026", date: "Jun 28, 2026", type: "Finalist" }
-]);
+let certificates = loadData("campuslyCertificates", []);
 
-let attendanceStats = loadData("campuslyAttendanceStats", { attended: 12, streak: 5 });
+let attendanceStats = loadData("campuslyAttendanceStats", { attended: 0, streak: 0 });
 let attendanceRecords = loadData("campuslyAttendanceRecords", []);
 let galleryItems = loadData("campuslyGalleryItems", [
   { id: "demo-1", eventId: 1, src: defaultEvents[0].image, title: "Hack the Campus — Opening", caption: "Innovation Lab · Tech Society", teamMember: "Tech Society Team", demo: true },
@@ -136,13 +133,224 @@ galleryItems = galleryItems.map(item => {
 saveData("campuslyGalleryItems", galleryItems);
 if (selectedGalleryEventId && !events.some(event => event.id === selectedGalleryEventId)) selectedGalleryEventId = null;
 
+/* =========================================================
+   MODES · SHARED PASS REGISTRY · NOTIFICATIONS · QR
+   ========================================================= */
+const PASS_KEY = "campuslyPassRegistry";
+
+function currentUser() { try { return JSON.parse(localStorage.getItem("campuslyUser") || "null") || {}; } catch (e) { return {}; } }
+function currentUid() { const u = currentUser(); return u.uid || u.email || "guest"; }
+function getMode(session) {
+  const saved = localStorage.getItem(`campuslyMode:${currentUid()}`);
+  return saved === "organiser" || saved === "attendee" ? saved : (session?.role === "organiser" ? "organiser" : "attendee");
+}
+function roleLabel(role = currentRole) { return role === "organiser" ? "Organizer" : "Participant"; }
+function switchMode(target) {
+  const next = typeof target === "string" ? target : (currentRole === "organiser" ? "attendee" : "organiser");
+  if (next === currentRole) return;
+  localStorage.setItem(`campuslyMode:${currentUid()}`, next);
+  showLoading(700);
+  window.location.href = "home.html";
+}
+function isOwnEvent(event) { return !!event.createdBy && event.createdBy === currentUid(); }
+let eventsScope = "all";
+function visibleEvents() { return currentRole === "organiser" ? [...events.filter(isOwnEvent), ...events.filter(e => !isOwnEvent(e))] : events; }
+function scopedEvents() { return currentRole === "organiser" && eventsScope === "mine" ? events.filter(isOwnEvent) : visibleEvents(); }
+function galleryEvents() { return currentRole === "organiser" ? events.filter(isOwnEvent) : events.filter(e => registrations.includes(e.id)); }
+
+function readRegistry() { try { return JSON.parse(localStorage.getItem(PASS_KEY) || "[]"); } catch (e) { return []; } }
+function writeRegistry(list) { localStorage.setItem(PASS_KEY, JSON.stringify(list)); }
+function eventRegistry(eventId) { return readRegistry().filter(r => Number(r.eventId) === Number(eventId)); }
+function passNoFor(eventId) { const r = readRegistry().find(r => r.uid === currentUid() && Number(r.eventId) === Number(eventId)); return r ? r.passNo : ""; }
+function addRegistryEntry(event, data) {
+  const list = readRegistry(), uid = currentUid();
+  if (list.some(r => r.uid === uid && r.eventId === event.id)) return;
+  const base = `CP-${String(event.id).padStart(2, "0")}-${String(getUserId()).slice(-3)}`;
+  let passNo = base, n = 1;
+  while (list.some(r => r.passNo === passNo)) passNo = `${base}-${++n}`;
+  list.push({ passNo, eventId: event.id, uid, userId: getUserId(), name: data.name, email: data.email, college: data.college, mode: data.mode, teamName: data.teamName || "", registeredAt: new Date().toISOString(), attended: false, attendedAt: null, certificate: null });
+  writeRegistry(list);
+}
+function removeRegistryEntry(eventId) { writeRegistry(readRegistry().filter(r => !(r.uid === currentUid() && r.eventId === eventId))); }
+
+// Participant stats + certificates are derived from the registry, so organiser actions reach the participant.
+function syncRecords() {
+  const uid = currentUid();
+  registrations.forEach(id => {
+    const d = registrationDetails[id], ev = events.find(e => e.id === id);
+    if (ev && d) addRegistryEntry(ev, d);
+  });
+  const mine = readRegistry().filter(r => r.uid === uid);
+  const attended = mine.filter(r => r.attended).length;
+  attendanceStats = { attended, streak: attended };
+  certificates = mine.filter(r => r.certificate).map(r => ({ eventId: r.eventId, event: (events.find(e => e.id === r.eventId) || {}).title || "Event", type: r.certificate.type, date: r.certificate.date, passNo: r.passNo }));
+}
+
+function setAttendance(passNo, present) {
+  const list = readRegistry(), entry = list.find(r => r.passNo === passNo);
+  if (!entry) return null;
+  entry.attended = present;
+  entry.attendedAt = present ? new Date().toISOString() : null;
+  writeRegistry(list);
+  const ev = events.find(e => e.id === entry.eventId);
+  if (present) pushNotification(entry.uid, "attendee", "Attendance marked", `You were checked in to ${ev ? ev.title : "an event"}.`);
+  return entry;
+}
+function issueCertificate(passNo, type) {
+  const list = readRegistry(), entry = list.find(r => r.passNo === passNo);
+  if (!entry || !entry.attended) return false;
+  entry.certificate = { type, date: new Date().toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }) };
+  writeRegistry(list);
+  const ev = events.find(e => e.id === entry.eventId);
+  pushNotification(entry.uid, "attendee", "Certificate issued", `Your ${type.toLowerCase()} certificate for ${ev ? ev.title : "an event"} is ready.`);
+  return true;
+}
+
+/* ---------- Notifications (real events only; the dot shows only when something is unread) ---------- */
+function readNotifications(uid = currentUid()) { try { return JSON.parse(localStorage.getItem(`campuslyNotifications:${uid}`) || "[]"); } catch (e) { return []; } }
+function pushNotification(uid, mode, title, text) {
+  if (!uid) return;
+  const list = readNotifications(uid);
+  list.unshift({ id: `n-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, mode, title, text, time: new Date().toISOString(), read: false });
+  localStorage.setItem(`campuslyNotifications:${uid}`, JSON.stringify(list.slice(0, 40)));
+  if (uid === currentUid()) renderNotificationBadge();
+}
+function myNotifications() { return readNotifications().filter(n => n.mode === currentRole); }
+function renderNotificationBadge() {
+  document.querySelector(".notification-btn")?.classList.toggle("has-unread", myNotifications().some(n => !n.read));
+}
+function timeAgo(iso) {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1440) return `${Math.round(mins / 60)} h ago`;
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+function toggleNotifications(e) {
+  e?.stopPropagation();
+  document.getElementById("profileMenu")?.classList.remove("show");
+  let panel = document.getElementById("notifPanel");
+  if (!panel) { panel = document.createElement("div"); panel.id = "notifPanel"; panel.className = "notif-panel"; document.querySelector(".nav-actions")?.appendChild(panel); }
+  if (panel.classList.contains("show")) { panel.classList.remove("show"); return; }
+  const mine = myNotifications();
+  panel.innerHTML = `<div class="notif-head"><strong>Notifications</strong>${mine.length ? '<button type="button" onclick="clearNotifications()">Clear</button>' : ""}</div>` +
+    (mine.length ? mine.map(n => `<div class="notif-item ${n.read ? "" : "unread"}"><strong>${escapeHtml(n.title)}</strong><p>${escapeHtml(n.text)}</p><small>${timeAgo(n.time)}</small></div>`).join("")
+      : `<div class="notif-empty">You're all caught up. Registrations, check-ins and certificates will show up here.</div>`);
+  panel.classList.add("show");
+  const all = readNotifications().map(n => n.mode === currentRole ? { ...n, read: true } : n);
+  localStorage.setItem(`campuslyNotifications:${currentUid()}`, JSON.stringify(all));
+  renderNotificationBadge();
+}
+function clearNotifications() {
+  localStorage.setItem(`campuslyNotifications:${currentUid()}`, JSON.stringify(readNotifications().filter(n => n.mode !== currentRole)));
+  document.getElementById("notifPanel")?.classList.remove("show");
+  renderNotificationBadge();
+}
+document.addEventListener("click", e => { if (!e.target.closest(".notif-panel, .notification-btn")) document.getElementById("notifPanel")?.classList.remove("show"); });
+
+/* ---------- Real, scannable QR code (byte mode, error correction M, versions 1-10) ---------- */
+function qrMatrix(text) {
+  const bytes = Array.from(new TextEncoder().encode(text));
+  const EC = [0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26], BL = [0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
+  const raw = v => { let r = (16 * v + 128) * v + 64; if (v >= 2) { const a = Math.floor(v / 7) + 2; r -= (25 * a - 10) * a - 55; if (v >= 7) r -= 36; } return r; };
+  let ver = 1;
+  for (; ; ver++) {
+    if (ver > 10) throw new Error("QR payload too long");
+    if (4 + (ver < 10 ? 8 : 16) + bytes.length * 8 <= (Math.floor(raw(ver) / 8) - EC[ver] * BL[ver]) * 8) break;
+  }
+  const cap = Math.floor(raw(ver) / 8) - EC[ver] * BL[ver], d = EC[ver];
+  const bits = [], put = (v, n) => { for (let i = n - 1; i >= 0; i--) bits.push((v >>> i) & 1); };
+  put(4, 4); put(bytes.length, ver < 10 ? 8 : 16); bytes.forEach(b => put(b, 8));
+  put(0, Math.min(4, cap * 8 - bits.length)); while (bits.length % 8) bits.push(0);
+  for (let p = 0xEC; bits.length < cap * 8; p ^= 0xEC ^ 0x11) put(p, 8);
+  const data = []; for (let i = 0; i < bits.length; i += 8) data.push(parseInt(bits.slice(i, i + 8).join(""), 2));
+  const mul = (x, y) => { let z = 0; for (let i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >>> 7) * 0x11D); z ^= ((y >>> i) & 1) * x; } return z; };
+  const div = new Array(d).fill(0); div[d - 1] = 1; let root = 1;
+  for (let i = 0; i < d; i++) { for (let j = 0; j < d; j++) { div[j] = mul(div[j], root); if (j + 1 < d) div[j] ^= div[j + 1]; } root = mul(root, 2); }
+  const rs = block => { const r = new Array(d).fill(0); block.forEach(b => { const f = b ^ r.shift(); r.push(0); div.forEach((c, i) => { r[i] ^= mul(c, f); }); }); return r; };
+  const nb = BL[ver], rawCw = Math.floor(raw(ver) / 8), shortN = nb - rawCw % nb, shortLen = Math.floor(rawCw / nb), blocks = [];
+  for (let i = 0, k = 0; i < nb; i++) { const len = shortLen - d + (i < shortN ? 0 : 1), dat = data.slice(k, k + len); k += len; const ecc = rs(dat); if (i < shortN) dat.push(0); blocks.push(dat.concat(ecc)); }
+  const out = []; for (let i = 0; i < blocks[0].length; i++) blocks.forEach((b, j) => { if (i !== shortLen - d || j >= shortN) out.push(b[i]); });
+  const size = ver * 4 + 17, grid = () => Array.from({ length: size }, () => new Array(size).fill(false));
+  const m = grid(), fn = grid(), set = (x, y, v) => { m[y][x] = v; fn[y][x] = true; };
+  for (let i = 0; i < size; i++) { set(6, i, i % 2 === 0); set(i, 6, i % 2 === 0); }
+  [[3, 3], [size - 4, 3], [3, size - 4]].forEach(([cx, cy]) => { for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) { const x = cx + dx, y = cy + dy, k = Math.max(Math.abs(dx), Math.abs(dy)); if (x >= 0 && x < size && y >= 0 && y < size) set(x, y, k !== 2 && k !== 4); } });
+  if (ver > 1) {
+    const na = Math.floor(ver / 7) + 2, step = Math.ceil((ver * 4 + 4) / (na * 2 - 2)) * 2, pos = [6];
+    for (let p = size - 7; pos.length < na; p -= step) pos.splice(1, 0, p);
+    pos.forEach((px, i) => pos.forEach((py, j) => {
+      if ((i === 0 && j === 0) || (i === 0 && j === na - 1) || (i === na - 1 && j === 0)) return;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) set(px + dx, py + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+    }));
+  }
+  const bit = (v, i) => ((v >>> i) & 1) !== 0;
+  const fmt = mask => {
+    let r = mask; for (let i = 0; i < 10; i++) r = (r << 1) ^ ((r >>> 9) * 0x537);
+    const b = ((mask << 10) | r) ^ 0x5412;
+    for (let i = 0; i <= 5; i++) set(8, i, bit(b, i)); set(8, 7, bit(b, 6)); set(8, 8, bit(b, 7)); set(7, 8, bit(b, 8));
+    for (let i = 9; i < 15; i++) set(14 - i, 8, bit(b, i));
+    for (let i = 0; i < 8; i++) set(size - 1 - i, 8, bit(b, i));
+    for (let i = 8; i < 15; i++) set(8, size - 15 + i, bit(b, i));
+    set(8, size - 8, true);
+  };
+  fmt(0);
+  if (ver >= 7) { let r = ver; for (let i = 0; i < 12; i++) r = (r << 1) ^ ((r >>> 11) * 0x1F25); const b = (ver << 12) | r; for (let i = 0; i < 18; i++) { const c = bit(b, i), a = size - 11 + i % 3, q = Math.floor(i / 3); set(a, q, c); set(q, a, c); } }
+  let bi = 0;
+  for (let right = size - 1; right >= 1; right -= 2) {
+    if (right === 6) right = 5;
+    for (let v = 0; v < size; v++) for (let j = 0; j < 2; j++) {
+      const x = right - j, y = ((right + 1) & 2) === 0 ? size - 1 - v : v;
+      if (!fn[y][x] && bi < out.length * 8) { m[y][x] = bit(out[bi >>> 3], 7 - (bi & 7)); bi++; }
+    }
+  }
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (!fn[y][x] && (x + y) % 2 === 0) m[y][x] = !m[y][x];
+  fmt(0);
+  return m;
+}
+function qrMarkup(text) {
+  const m = qrMatrix(text), n = m.length, q = 4;
+  let path = "";
+  m.forEach((row, y) => row.forEach((on, x) => { if (on) path += `M${x + q} ${y + q}h1v1h-1z`; }));
+  return `<div class="mini-qr" aria-label="QR code"><svg viewBox="0 0 ${n + q * 2} ${n + q * 2}" role="img" aria-label="QR code for this pass" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="${path}" fill="#000"/></svg></div>`;
+}
+const qrPayload = passNo => `CAMPUSLY:${passNo}`;
+
+function normalizeEvents(list) {
+  const cleaned = (Array.isArray(list) ? list : defaultEvents).map(item => {
+    const base = defaultEvents.find(def => def.id === item.id) || {};
+    const mode = item.registrationMode || base.registrationMode || "individual";
+    const event = { ...item, registrationMode: mode };
+    if (mode === "team") {
+      let min = parseInt(item.teamMin ?? base.teamMin, 10);
+      let max = parseInt(item.teamMax ?? base.teamMax, 10);
+      if (!Number.isFinite(min) || min < 1) min = 2;
+      if (!Number.isFinite(max) || max < 1) max = Math.max(min, 4);
+      if (min > max) [min, max] = [max, min];
+      event.teamMin = min;
+      event.teamMax = max;
+    }
+    return event;
+  });
+  try { localStorage.setItem("campuslyEvents", JSON.stringify(cleaned)); } catch (e) {}
+  return cleaned;
+}
+
+function scopedKey(key) {
+  const userScoped = ["campuslyRegistrations", "campuslyRegistrationDetails", "campuslyCertificates", "campuslyAttendanceStats", "campuslyAttendanceRecords"];
+  if (!userScoped.includes(key)) return key;
+  try {
+    const user = JSON.parse(localStorage.getItem("campuslyUser") || "null");
+    return user && user.uid ? `${key}:${user.uid}` : key;
+  } catch (e) { return key; }
+}
+
 function loadData(key, fallback) {
-  const saved = localStorage.getItem(key);
+  const saved = localStorage.getItem(scopedKey(key));
   return saved ? JSON.parse(saved) : fallback;
 }
 
 function saveData(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+  localStorage.setItem(scopedKey(key), JSON.stringify(value));
 }
 
 function showLoading(duration = 900) {
@@ -181,58 +389,99 @@ function showSignup(role) {
   document.getElementById("signupName")?.focus();
 }
 
-function demoGoogleSignup() {
-  const role = document.getElementById("signupRole").value || "attendee";
-  document.getElementById("signupName").value = role === "organiser" ? "Campusly Organizer" : "Campusly Attendee";
-  document.getElementById("signupEmail").value = role === "organiser" ? "organizer@campusly.demo" : "student@campusly.demo";
-  document.getElementById("signupCollege").value = "Campusly Demo College";
-  signupUser({ preventDefault: () => {} });
+function setAuthMessage(message, type = "error") {
+  const box = document.getElementById("authMessage");
+  if (!box) { if (message) showToast(message); return; }
+  box.textContent = message || "";
+  box.hidden = !message;
+  box.classList.toggle("error", type === "error");
 }
 
-function signupUser(event) {
+function setAuthBusy(form, busy) {
+  form?.querySelectorAll("button, input, select").forEach(el => { el.disabled = busy; });
+}
+
+function goToPortal() {
+  showLoading(700);
+  window.location.href = "home.html";
+}
+
+async function googleAuth() {
+  setAuthMessage("");
+  try {
+    const role = document.getElementById("signupRole")?.value;
+    const college = document.getElementById("signupCollege")?.value.trim();
+    await CampuslyAuth.signInWithGoogle({ role, college });
+    goToPortal();
+  } catch (err) { setAuthMessage(err.message || "Google sign-in failed."); }
+}
+
+async function signInUser(event) {
   event.preventDefault();
-
-  const name = document.getElementById("signupName").value.trim();
-  const email = document.getElementById("signupEmail").value.trim();
-  const college = document.getElementById("signupCollege").value.trim();
-  const role = document.getElementById("signupRole").value;
-
-  if (!name || !email || !college) return;
-
-  localStorage.setItem("campuslyUser", JSON.stringify({ name, email, college, role, id: `CLY-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}` }));
-  currentRole = role;
-  localStorage.setItem("campuslyRole", role);
-
-  showLoading(700);
-  window.location.href = "home.html";
+  setAuthMessage("");
+  const form = event.target;
+  const email = document.getElementById("signinEmail").value.trim();
+  const password = document.getElementById("signinPassword").value;
+  if (!email || !password) { setAuthMessage("Enter your email and password."); return; }
+  setAuthBusy(form, true);
+  try {
+    await CampuslyAuth.signIn(email, password);
+    goToPortal();
+  } catch (err) {
+    setAuthMessage(err.message || "Couldn't sign you in. Try again.");
+    setAuthBusy(form, false);
+  }
 }
 
-function enterPortal(role) {
-  currentRole = role;
-  localStorage.setItem("campuslyRole", role);
+async function signupUser(event) {
+  event.preventDefault();
+  setAuthMessage("");
+  const form = event.target;
+  const password = document.getElementById("signupPassword").value;
+  if (password !== document.getElementById("signupConfirm").value) { setAuthMessage("The two passwords don't match."); return; }
+  setAuthBusy(form, true);
+  try {
+    await CampuslyAuth.signUp({
+      name: document.getElementById("signupName").value,
+      email: document.getElementById("signupEmail").value,
+      college: document.getElementById("signupCollege").value,
+      role: document.getElementById("signupRole").value,
+      password
+    });
+    goToPortal();
+  } catch (err) {
+    setAuthMessage(err.message || "Couldn't create your account. Try again.");
+    setAuthBusy(form, false);
+  }
+}
 
-  localStorage.setItem("campuslyRole", role);
-  showLoading(700);
-  window.location.href = "home.html";
+async function forgotPassword() {
+  setAuthMessage("");
+  try {
+    await CampuslyAuth.resetPassword(document.getElementById("signinEmail").value);
+    setAuthMessage("Password reset email sent. Check your inbox.", "info");
+  } catch (err) { setAuthMessage(err.message || "Couldn't send the reset email."); }
 }
 
 function updateUserInterface() {
-  const attendeeItems = document.querySelectorAll(".attendee-only");
-  const organiserItems = document.querySelectorAll(".organiser-only");
-
-  attendeeItems.forEach(item => {
-    item.style.display = currentRole === "attendee" ? "" : "none";
-  });
-
-  organiserItems.forEach(item => {
-    item.style.display = currentRole === "organiser" ? "" : "none";
-  });
-
-  const savedUser = JSON.parse(localStorage.getItem("campuslyUser") || "null");
-  const name = savedUser?.name || (currentRole === "organiser" ? "Maya" : "Aarav");
+  document.querySelectorAll(".attendee-only").forEach(item => { item.style.display = currentRole === "attendee" ? "" : "none"; });
+  document.querySelectorAll(".organiser-only").forEach(item => { item.style.display = currentRole === "organiser" ? "" : "none"; });
+  const name = currentUser().name || (currentRole === "organiser" ? "Maya" : "Aarav");
   document.getElementById("profileName").textContent = name;
-  document.getElementById("profileRole").textContent = currentRole.toUpperCase();
+  document.getElementById("profileRole").textContent = roleLabel().toUpperCase();
   document.getElementById("profileAvatar").textContent = name.charAt(0);
+  const menu = document.getElementById("profileMenu");
+  if (menu && !document.getElementById("modeSwitchBtn")) {
+    const btn = document.createElement("button");
+    btn.id = "modeSwitchBtn";
+    btn.onclick = () => switchMode();
+    menu.insertBefore(btn, menu.querySelector("button"));
+  }
+  const switchBtn = document.getElementById("modeSwitchBtn");
+  if (switchBtn) switchBtn.textContent = currentRole === "organiser" ? "Switch to Participant mode" : "Switch to Organizer mode";
+  renderNotificationBadge();
+  radialNavIndex = 0;
+  renderRadialNav();
 }
 
 function navigate(page) {
@@ -246,6 +495,7 @@ function navigate(page) {
     create: "create.html",
     manage: "manage.html",
     scanner: "scanner.html",
+    certificates: "certificates.html",
     profile: "profile.html"
   };
 
@@ -253,7 +503,7 @@ function navigate(page) {
     page = "home";
   }
 
-  if (currentRole === "organiser" && ["wallet", "registrations"].includes(page)) {
+  if (currentRole === "organiser" && ["wallet", "registrations", "certificates"].includes(page)) {
     page = "manage";
   }
 
@@ -275,6 +525,7 @@ function renderCurrentPage() {
     create: renderCreateEvent,
     manage: renderManage,
     scanner: renderScanner,
+    certificates: renderCertificatesPage,
     profile: renderProfile
   };
 
@@ -294,35 +545,50 @@ function renderCurrentPage() {
   setupFeaturedCarousel();
   setupEventCardMotion();
   setupWalletInteraction();
+  if (page === "scanner") setupScanner();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 /* ---------- HOME ---------- */
 
 function renderHome() {
-  const upcomingCount = events.length;
-  const participantCount = events.reduce((sum, event) => sum + event.registered, 0);
+  const org = currentRole === "organiser";
+  const list = visibleEvents();
+  const regs = org ? list.reduce((sum, e) => sum + eventRegistry(e.id).length, 0) : events.reduce((sum, e) => sum + e.registered, 0);
+  const features = org ? [
+    ["Discover", "See how the events you publish look to students across campus."],
+    ["Create", "Publish an event with venue, capacity and registration type in minutes."],
+    ["Move", "Share college bus routes and carpools so people can reach your event."],
+    ["Remember", "Mark attendance, issue certificates and keep each event's album."]
+  ] : [
+    ["Discover", "Browse technical, cultural, sports, academic and social events."],
+    ["Register", "Reserve a spot in seconds and keep all your registrations together."],
+    ["Move", "Check college bus routes or find a carpool for your event."],
+    ["Remember", "Build a digital record of events, achievements and certificates."]
+  ];
 
   return `
     <section class="hero">
       <div class="hero-content">
         <p class="eyebrow">THE CAMPUS EVENT EXPERIENCE</p>
-        <h1>Find your next<br><em>thing to do.</em></h1>
-        <p class="hero-copy">
-          Discover what is happening around campus, reserve your spot,
-          find a ride and keep every achievement with you.
-        </p>
+        <h1>${org ? "Create your next<br><em>big event.</em>" : "Find your next<br><em>thing to do.</em>"}</h1>
+        <p class="hero-copy">${org
+          ? "Publish an event, track registrations, scan passes at the door and issue certificates — all from one place."
+          : "Discover what is happening around campus, reserve your spot, find a ride and keep every achievement with you."}</p>
         <div class="hero-actions">
-          <button class="btn btn-lime" onclick="navigate('events')">Explore events ↗</button>
-          <button class="btn btn-light" onclick="navigate('transport')">Find a ride</button>
+          ${org
+            ? `<button class="btn btn-lime" onclick="navigate('create')">Create event ↗</button>
+               <button class="btn btn-light" onclick="navigate('manage')">Manage events</button>`
+            : `<button class="btn btn-lime" onclick="navigate('events')">Explore events ↗</button>
+               <button class="btn btn-light" onclick="navigate('transport')">Find a ride</button>`}
         </div>
       </div>
       <div class="hero-featured" aria-label="Featured events">
         ${renderFeaturedCarousel()}
       </div>
       <div class="hero-bottom">
-        <span>${upcomingCount} LIVE EVENT LISTINGS</span>
-        <span>${participantCount.toLocaleString()} REGISTRATIONS & COUNTING</span>
+        <span>${org ? events.filter(isOwnEvent).length : list.length} ${org ? "EVENTS CREATED" : "LIVE EVENT LISTINGS"}</span>
+        <span>${regs.toLocaleString()} REGISTRATIONS & COUNTING</span>
       </div>
     </section>
 
@@ -332,32 +598,13 @@ function renderHome() {
           <p class="eyebrow">EVERYTHING CONNECTED</p>
           <h1>Your campus,<br><span>in one place.</span></h1>
         </div>
-        <p>Campusly removes the friction between hearing about an event and actually being there. Everything from registration to certificates lives in one simple portal.</p>
+        <p>${org
+          ? "Campusly takes you from idea to certificate: create the event, scan entries, track attendance and issue certificates from one portal."
+          : "Campusly removes the friction between hearing about an event and actually being there. Everything from registration to certificates lives in one simple portal."}</p>
       </div>
-
       <div class="mini-features">
-        <article class="mini-feature">
-          <div class="feature-number">01</div>
-          <h3>Discover</h3>
-          <p>Browse technical, cultural, sports, academic and social events.</p>
-        </article>
-        <article class="mini-feature">
-          <div class="feature-number">02</div>
-          <h3>Register</h3>
-          <p>Reserve a spot in seconds and keep all your registrations together.</p>
-        </article>
-        <article class="mini-feature">
-          <div class="feature-number">03</div>
-          <h3>Move</h3>
-          <p>Check college bus routes or find a carpool for your event.</p>
-        </article>
-        <article class="mini-feature">
-          <div class="feature-number">04</div>
-          <h3>Remember</h3>
-          <p>Build a digital record of events, achievements and certificates.</p>
-        </article>
+        ${features.map((f, i) => `<article class="mini-feature"><div class="feature-number">0${i + 1}</div><h3>${f[0]}</h3><p>${f[1]}</p></article>`).join("")}
       </div>
-
     </section>
   `;
 }
@@ -367,8 +614,8 @@ function renderFeaturedEvents() {
 }
 
 function renderFeaturedCarousel() {
-  const featured = events.slice(0, Math.min(events.length, 6));
-  if (!featured.length) return `<div class="soft-card" style="padding:40px">No events available yet.</div>`;
+  const featured = visibleEvents().slice(0, 6);
+  if (!featured.length) return `<div class="soft-card empty-card"><p class="eyebrow">NO EVENTS YET</p><h3>No events available yet.</h3>${currentRole === "organiser" ? `<button class="btn btn-dark" onclick="navigate('create')">Create your first event ↗</button>` : ""}</div>`;
 
   return `
     <div class="featured-carousel" id="featuredCarousel" data-active-index="0" tabindex="0" aria-label="Featured events carousel">
@@ -399,8 +646,8 @@ function featuredCard(event, index) {
           <h3>${event.title}</h3>
           <p>◷ ${event.date} · ${event.time}</p>
           <p>⌖ ${event.venue}</p>
-          <button class="btn btn-lime featured-action" type="button" onclick="showEvent(${event.id})">View Details &amp; Register →</button>
-          ${isRegistered ? `<span class="featured-registered">Registered ✓</span>` : ""}
+          <button class="btn btn-lime featured-action" type="button" onclick="showEvent(${event.id})">${currentRole === "attendee" ? "View details &amp; Register →" : "View details →"}</button>
+          ${isRegistered && currentRole === "attendee" ? `<span class="featured-registered">Registered ✓</span>` : ""}
         </div>
       </div>
     </article>
@@ -483,41 +730,44 @@ function setupFeaturedCarousel() {
 /* ---------- EVENTS ---------- */
 
 function renderEvents() {
+  const org = currentRole === "organiser";
+  const list = visibleEvents();
   return `
-    <section class="page">
-      <div class="page-header">
+    <section class="page events-page-first">
+      ${list.length ? renderEventsPageCarousel() : ""}
+
+      <div class="page-header events-all-header">
         <div>
           <p class="eyebrow">DISCOVER</p>
           <h1>What's<br><span>happening?</span></h1>
         </div>
-        <p>Search by event name or filter by category. Open any event to see its full details and reserve your place.</p>
+        <p>${org ? "Every event on campus, with the ones you created shown first and marked. Use the switch below to see only yours." : "Search by event name or filter by category. Open any event to see its full details and reserve your place."}</p>
       </div>
 
-      ${renderEventsPageCarousel()}
-
+      ${org ? `<div class="scope-toggle" role="group" aria-label="Event scope"><button type="button" class="scope-btn ${eventsScope === "all" ? "active" : ""}" data-scope="all">All events</button><button type="button" class="scope-btn ${eventsScope === "mine" ? "active" : ""}" data-scope="mine">Created by me</button></div>` : ""}
       <div class="filter-bar">
         <label class="search-box">
           <span>⌕</span>
           <input id="eventSearch" type="search" placeholder="Search events..." autocomplete="off">
         </label>
-        <button class="filter-btn active" data-category="All">All</button>
-        <button class="filter-btn" data-category="Technical">Technical</button>
-        <button class="filter-btn" data-category="Cultural">Cultural</button>
-        <button class="filter-btn" data-category="Sports">Sports</button>
-        <button class="filter-btn" data-category="Academic">Academic</button>
-        <button class="filter-btn" data-category="Art">Art</button>
-        <button class="filter-btn" data-category="Music">Music</button>
+        ${["All", "Technical", "Cultural", "Sports", "Academic", "Art", "Music"].map((c, i) => `<button class="filter-btn ${i === 0 ? "active" : ""}" data-category="${c}">${c}</button>`).join("")}
       </div>
 
       <div id="eventsGrid" class="events-grid">
-        ${events.map(event => eventCard(event)).join("")}
+        ${scopedEvents().length ? scopedEvents().map(event => eventCard(event)).join("") : emptyEventsCard()}
       </div>
     </section>
   `;
 }
 
+function emptyEventsCard() {
+  return currentRole === "organiser" && eventsScope === "mine"
+    ? `<div class="soft-card empty-card" style="grid-column:1/-1"><p class="eyebrow">NOTHING PUBLISHED YET</p><h3>You haven't created any events.</h3><button class="btn btn-dark" onclick="navigate('create')">Create an event ↗</button></div>`
+    : `<div class="soft-card empty-card" style="grid-column:1/-1"><p class="eyebrow">NO EVENTS</p><h3>No events match your search.</h3></div>`;
+}
+
 function renderEventsPageCarousel() {
-  const list = events.slice(0, Math.min(events.length, 6));
+  const list = visibleEvents().slice(0, 6);
   if (!list.length) return "";
 
   return `
@@ -533,7 +783,7 @@ function renderEventsPageCarousel() {
         <div class="events-page-track">
           ${list.map((event, index) => {
             const image = event.image || "https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&w=1000&q=80";
-            const registered = registrations.includes(event.id);
+            const registered = currentRole === "attendee" && registrations.includes(event.id);
             return `
               <article class="events-page-card" data-carousel-index="${index}" data-event-id="${event.id}">
                 <div class="events-page-cover" style="background-image:linear-gradient(180deg,rgba(0,0,0,.04),rgba(0,0,0,.82)),url('${image}')">
@@ -652,8 +902,10 @@ function eventCard(event) {
         <div class="event-footer">
           <button class="btn btn-outline" onclick="showEvent(${event.id})">View details</button>
           ${currentRole === "attendee"
-            ? `<button class="btn ${isRegistered ? "btn-light" : "btn-dark"}" onclick="${isRegistered ? `cancelRegistration(${event.id})` : `openRegistrationForm(${event.id})`}">${isRegistered ? "Registered ✓" : "Register"}</button>`
-            : `<span class="status">${event.registered} registered</span>`
+            ? (isOwnEvent(event)
+              ? `<span class="status">Hosted by you</span>`
+              : `<button class="btn ${isRegistered ? "btn-light" : "btn-dark"}" onclick="${isRegistered ? `cancelRegistration(${event.id})` : `openRegistrationForm(${event.id})`}">${isRegistered ? "Registered ✓" : "Register"}</button>`)
+            : `<span class="status">${isOwnEvent(event) ? "Created by you · " : ""}${event.registered} registered</span>`
           }
         </div>
       </div>
@@ -665,11 +917,12 @@ function setupEventFilters() {
   const search = document.getElementById("eventSearch");
   const buttons = document.querySelectorAll(".filter-btn");
 
+  if (!search) return;
   function filterEvents() {
     const term = search.value.toLowerCase().trim();
     const active = document.querySelector(".filter-btn.active").dataset.category;
 
-    const filtered = events.filter(event => {
+    const filtered = scopedEvents().filter(event => {
       const matchesSearch =
         event.title.toLowerCase().includes(term) ||
         event.description.toLowerCase().includes(term) ||
@@ -682,10 +935,16 @@ function setupEventFilters() {
     document.getElementById("eventsGrid").innerHTML =
       filtered.length
         ? filtered.map(event => eventCard(event)).join("")
-        : `<div class="soft-card" style="grid-column:1/-1;padding:45px;text-align:center;color:#777">No events match your search.</div>`;
+        : emptyEventsCard();
   }
 
   search.addEventListener("input", filterEvents);
+
+  document.querySelectorAll(".scope-btn").forEach(btn => btn.addEventListener("click", () => {
+    eventsScope = btn.dataset.scope;
+    document.querySelectorAll(".scope-btn").forEach(b => b.classList.toggle("active", b === btn));
+    filterEvents();
+  }));
 
   buttons.forEach(button => {
     button.addEventListener("click", () => {
@@ -716,7 +975,9 @@ function showEvent(id) {
       <div class="detail-row"><span>Capacity</span><strong>${event.registered} / ${event.seats}</strong></div>
     </div>
     ${currentRole === "attendee"
-      ? `<button class="btn ${isRegistered ? "btn-light" : "btn-dark"}" onclick="${isRegistered ? `cancelRegistration(${id});closeModal()` : `openRegistrationForm(${id})`}">${isRegistered ? "Cancel registration" : "Register now ↗"}</button>`
+      ? (isOwnEvent(event)
+        ? `<p class="scan-note">You created this event, so you can't register for it as a participant.</p>`
+        : `<button class="btn ${isRegistered ? "btn-light" : "btn-dark"}" onclick="${isRegistered ? `cancelRegistration(${id});closeModal()` : `openRegistrationForm(${id})`}">${isRegistered ? "Cancel registration" : "Register now ↗"}</button>`)
       : ""
     }
   `;
@@ -732,11 +993,12 @@ function openRegistrationForm(id) {
   const teamMin = event.teamMin || 2;
   const teamMax = event.teamMax || 4;
   const saved = registrationDetails[id] || {};
+  const leadLine = `${saved.name || getUserName()}${(saved.email || getUserEmail()) ? ", " + (saved.email || getUserEmail()) : ""}`.trim();
 
   document.getElementById("modalContent").innerHTML = `
     <p class="eyebrow">REGISTRATION · ${event.category}</p>
     <h2>Join ${event.title}.</h2>
-    <p>Form pe details fill karo. Registration submit hone ke baad hi tumhara pass wallet mein generate hoga.</p>
+    <p>Fill in your details below. Your pass will be generated in your Wallet once the registration is submitted.</p>
     <form class="registration-form" onsubmit="submitRegistration(event, ${id})">
       <div class="registration-mode-row">
         <button type="button" class="mode-chip ${mode === "individual" ? "active" : ""}" disabled>Individual</button>
@@ -746,16 +1008,17 @@ function openRegistrationForm(id) {
       <label class="form-field"><span>Email</span><input id="regEmail" type="email" required value="${saved.email || getUserEmail()}" placeholder="you@college.edu"></label>
       <label class="form-field"><span>College / Department</span><input id="regCollege" required value="${saved.college || getUserCollege()}" placeholder="Your college / department"></label>
       ${mode === "team" ? `
-        <div class="team-config-note"><strong>Team size: ${teamMin}-${teamMax}</strong><span>Organizer ne is event ko team registration ke liye set kiya hai.</span></div>
+        <div class="team-config-note"><strong>Team size: ${teamMin}-${teamMax}</strong><span>The organiser has set this event up for team registration.</span></div>
         <label class="form-field"><span>Team name</span><input id="regTeamName" required value="${saved.teamName || ""}" placeholder="e.g. Byte Force"></label>
         <label class="form-field"><span>Team size</span><input id="regTeamSize" type="number" min="${teamMin}" max="${teamMax}" required value="${saved.teamSize || teamMin}" placeholder="${teamMin}-${teamMax}"></label>
-        <label class="form-field full"><span>Team members</span><textarea id="regMembers" required placeholder="One member per line — name + email">${saved.members || ""}</textarea></label>
+        <label class="form-field full"><span>Team members (include yourself)</span><textarea id="regMembers" required placeholder="One member per line: Name, email@college.edu">${saved.members || leadLine}</textarea></label>
       ` : `
         <label class="form-field full"><span>Phone number</span><input id="regPhone" required value="${saved.phone || ""}" placeholder="10 digit mobile number"></label>
       `}
       <div class="registration-actions"><button type="submit" class="btn btn-dark">Submit registration ↗</button><button type="button" class="btn btn-light" onclick="showEvent(${id})">Back</button></div>
     </form>
   `;
+  document.getElementById("modal").classList.remove("hidden");
 }
 
 function getUserName() { return JSON.parse(localStorage.getItem("campuslyUser") || "null")?.name || ""; }
@@ -766,6 +1029,7 @@ function submitRegistration(formEvent, id) {
   formEvent.preventDefault();
   const event = events.find(item => item.id === id);
   if (!event || registrations.includes(id)) return;
+  if (isOwnEvent(event)) { showToast("You created this event, so you can't register for it."); return; }
   if (event.registered >= event.seats) { showToast("This event is currently full."); return; }
 
   const mode = event.registrationMode || "individual";
@@ -782,8 +1046,25 @@ function submitRegistration(formEvent, id) {
 
   if (mode === "team") {
     const min = event.teamMin || 2, max = event.teamMax || 4;
-    if (data.teamSize < min || data.teamSize > max) { showToast(`Team size ${min}-${max} members hona chahiye.`); return; }
-    if (!data.teamName || !data.members) { showToast("Team name aur members fill karo."); return; }
+    if (!Number.isInteger(data.teamSize) || data.teamSize < min || data.teamSize > max) { showToast(`Team size must be between ${min} and ${max} members.`); return; }
+    if (!data.teamName || !data.members) { showToast("Please enter a team name and list your team members."); return; }
+
+    const lines = data.members.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    const emailPattern = /[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+/;
+    const seen = new Set();
+    const memberList = [];
+    for (const line of lines) {
+      const found = line.match(emailPattern);
+      if (!found) { showToast(`Add an email for each member. Missing on: "${line}"`); return; }
+      const email = found[0].toLowerCase();
+      if (seen.has(email)) { showToast(`${email} is listed more than once.`); return; }
+      seen.add(email);
+      const name = line.replace(found[0], "").replace(/[,;|\-–—]+\s*$/, "").replace(/^\s*[,;|\-–—]+/, "").trim();
+      if (!name) { showToast(`Add a name for ${email}.`); return; }
+      memberList.push({ name, email });
+    }
+    if (memberList.length !== data.teamSize) { showToast(`Team size is ${data.teamSize} but you listed ${memberList.length} member${memberList.length === 1 ? "" : "s"}.`); return; }
+    data.memberList = memberList;
   }
 
   registrationDetails[id] = data;
@@ -792,13 +1073,16 @@ function submitRegistration(formEvent, id) {
   saveData("campuslyRegistrationDetails", registrationDetails);
   saveData("campuslyRegistrations", registrations);
   saveData("campuslyEvents", events);
+  addRegistryEntry(event, data);
+  pushNotification(currentUid(), "attendee", "Registration confirmed", `Your pass for ${event.title} is in your Wallet.`);
+  if (event.createdBy) pushNotification(event.createdBy, "organiser", "New registration", `${data.name} registered for ${event.title}.`);
 
   document.getElementById("modalContent").innerHTML = `
     <div class="registration-success">
       <div class="success-mark">✓</div>
       <p class="eyebrow">REGISTRATION CONFIRMED</p>
       <h2>You’re in.</h2>
-      <p>${event.title} ke liye registration successfully submit ho gayi. Ab tumhara digital pass Wallet mein available hai.</p>
+      <p>Your registration for ${event.title} was submitted successfully. Your digital pass is now available in your Wallet.</p>
       <div class="success-actions"><button class="btn btn-dark" onclick="closeModal();navigate('wallet')">Open Wallet ↗</button><button class="btn btn-light" onclick="closeModal();navigate('events')">Back to events</button></div>
     </div>
   `;
@@ -816,6 +1100,8 @@ function cancelRegistration(id) {
 
   saveData("campuslyRegistrations", registrations);
   saveData("campuslyEvents", events);
+  removeRegistryEntry(id);
+  if (event && event.createdBy) pushNotification(event.createdBy, "organiser", "Registration cancelled", `${getUserName() || "A participant"} cancelled their registration for ${event.title}.`);
 
   showToast("Registration cancelled.");
   navigate("registrations");
@@ -851,31 +1137,76 @@ function renderRegistrations() {
 
 /* ---------- TRANSPORT ---------- */
 
+/* ---------- TRANSPORT: bus reservation + carpool (step-by-step flows) ---------- */
+const BUS_ROUTES = [
+  { id: "A", name: "Route A · North Gate", time: "07:15 AM", capacity: 40 },
+  { id: "B", name: "Route B · Hostel Block", time: "07:30 AM", capacity: 25 },
+  { id: "C", name: "Route C · City Centre", time: "08:00 AM", capacity: 20 }
+];
+let tw = {};
+
+function readList(key) { try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { return []; } }
+function writeList(key, list) { localStorage.setItem(key, JSON.stringify(list)); }
+const readBookings = () => readList("campuslyBusBookings");
+const readRides = () => readList("campuslyRides");
+function myTransport(eventId) {
+  const uid = currentUid(), id = Number(eventId), rides = readRides().filter(r => r.eventId === id);
+  const bus = readBookings().some(b => b.uid === uid && b.eventId === id);
+  const offer = rides.some(r => r.uid === uid);
+  const req = rides.some(r => r.requests.some(q => q.uid === uid && q.status !== "declined"));
+  return { bus, offer, req, carpool: offer || req, any: bus || offer || req };
+}
+function transportOptions() { return myRegEvents().filter(e => !myTransport(e.id).any); }
+function eventTitle(id) { return (events.find(e => e.id === Number(id)) || {}).title || "Event"; }
+function myRegEvents() { return events.filter(e => registrations.includes(e.id)); }
+function seatsLeftBus(eventId, routeId) {
+  const route = BUS_ROUTES.find(r => r.id === routeId);
+  return route.capacity - readBookings().filter(b => b.eventId === Number(eventId) && b.routeId === routeId).length;
+}
+function rideSeatsLeft(ride) { return ride.seats - ride.requests.filter(r => r.status === "accepted").length; }
+function openModal(html) { document.getElementById("modalContent").innerHTML = html; document.getElementById("modal").classList.remove("hidden"); }
+function stepper(labels, step) {
+  return `<div class="wizard-steps">${labels.map((l, i) => `<span class="${i + 1 === step ? "active" : i + 1 < step ? "done" : ""}"><b>${i + 1 < step ? "✓" : i + 1}</b>${l}</span>`).join("")}</div>`;
+}
+function validPhone(v) { return /^\d{10}$/.test(String(v).replace(/[\s-]/g, "")); }
+function wizardError(msg) { const el = document.getElementById("wizError"); if (el) { el.textContent = msg; el.hidden = !msg; } }
+function noEventsHtml(what) {
+  const regs = myRegEvents().length;
+  return regs
+    ? `<p class="eyebrow">${what}</p><h2>Transport is already arranged.</h2><p>Each event allows either a bus seat or a carpool (offering or requesting a ride), not both. Every event you're registered for already has one. Cancel it first if you want to switch.</p><button class="btn btn-dark" onclick="closeModal()">Got it</button>`
+    : `<p class="eyebrow">${what}</p><h2>Register for an event first.</h2><p>Transport is arranged per event, so you need to be registered for at least one event.</p><button class="btn btn-dark" onclick="closeModal();navigate('events')">Explore events ↗</button>`;
+}
+
 function renderTransport() {
+  if (currentRole === "organiser") return renderTransportOrganiser();
+  const uid = currentUid();
+  const myBookings = readBookings().filter(b => b.uid === uid);
+  const rides = readRides();
+  const myOffers = rides.filter(r => r.uid === uid);
+  const myRequests = rides.flatMap(r => r.requests.filter(q => q.uid === uid).map(q => ({ ride: r, req: q })));
+  const regIds = registrations;
+  const available = rides.filter(r => r.uid !== uid && regIds.includes(r.eventId) && rideSeatsLeft(r) > 0 && !myTransport(r.eventId).any);
+  const next = myBookings[0];
+  const nextRoute = next && BUS_ROUTES.find(r => r.id === next.routeId);
+
   return `
     <section class="page">
       <div class="page-header">
-        <div>
-          <p class="eyebrow">GET THERE</p>
-          <h1>Move<br><span>together.</span></h1>
-        </div>
-        <p>Book a college bus seat or find a student carpool heading toward your event. Less stress, fewer empty seats.</p>
+        <div><p class="eyebrow">GET THERE</p><h1>Move<br><span>together.</span></h1></div>
+        <p>For each event you're registered for, pick one way to get there: a college bus seat or a carpool (offer a ride or request one).</p>
       </div>
 
       <div class="transport-hero">
         <article class="transport-intro">
           <p class="eyebrow" style="color:rgba(255,255,255,.55)">COLLEGE BUS</p>
           <h2>Routes that<br>keep you moving.</h2>
-          <p>Check departure points, timings and available seats for upcoming events.</p>
+          <p>Pick an event, choose a route and confirm your seat.</p>
         </article>
-
         <article class="route-card">
-          <span class="eyebrow">NEXT DEPARTURE</span>
-          <div class="route-number">07<span style="font-size:28px">:15</span></div>
-          <div>
-            <div class="route-line">NORTH GATE → MAIN CAMPUS</div>
-            <p style="font-size:11px;color:#777">Friday · 04 Sep · 34 seats available</p>
-          </div>
+          <span class="eyebrow">YOUR NEXT BUS</span>
+          <div class="route-number" style="font-size:${next ? "" : "42px"}">${nextRoute ? nextRoute.time.slice(0, 5) : "None"}</div>
+          <div><div class="route-line">${nextRoute ? nextRoute.name.toUpperCase() : "NO SEAT RESERVED YET"}</div>
+          <p style="font-size:11px;color:#777">${next ? escapeHtml(eventTitle(next.eventId)) : "Reserve a seat below."}</p></div>
         </article>
       </div>
 
@@ -883,56 +1214,199 @@ function renderTransport() {
         <article class="soft-card transport-card">
           <p class="eyebrow">01 · BUS FACILITY</p>
           <h3>Reserve a seat.</h3>
-          <p>Choose a route for your event and reserve a seat before it fills up.</p>
-
+          <p>Four steps: event → route → your details → confirm.</p>
+          <button class="btn btn-dark" onclick="startBus()">Reserve a bus seat ↗</button>
           <div class="transport-options">
-            <div class="transport-option">
-              <div><strong>Route A · North Gate</strong><small>07:15 AM · 34 seats</small></div>
-              <button class="btn btn-dark" onclick="showToast('Bus seat reserved for Route A.')">Reserve</button>
-            </div>
-            <div class="transport-option">
-              <div><strong>Route B · Hostel Block</strong><small>07:30 AM · 19 seats</small></div>
-              <button class="btn btn-dark" onclick="showToast('Bus seat reserved for Route B.')">Reserve</button>
-            </div>
-            <div class="transport-option">
-              <div><strong>Route C · City Centre</strong><small>08:00 AM · 12 seats</small></div>
-              <button class="btn btn-dark" onclick="showToast('Bus seat reserved for Route C.')">Reserve</button>
-            </div>
+            ${myBookings.length ? myBookings.map(b => { const rt = BUS_ROUTES.find(r => r.id === b.routeId); return `<div class="transport-option"><div><strong>${escapeHtml(eventTitle(b.eventId))}</strong><small>${rt.name} · ${rt.time} · ${b.id}</small></div><button class="btn btn-light" onclick="cancelBus('${b.id}')">Cancel</button></div>`; }).join("") : `<p class="muted-note">No bus seats reserved.</p>`}
           </div>
         </article>
 
         <article class="soft-card transport-card">
           <p class="eyebrow">02 · CARPOOL</p>
           <h3>Share the ride.</h3>
-          <p>Find students going in the same direction or offer an available seat in your car.</p>
-
+          <p>Request a seat in a classmate's car, or offer your own. Drivers approve each request.</p>
+          <button class="btn btn-lime" onclick="startOffer()">Offer a ride +</button>
           <div class="transport-options">
-            <div class="transport-option">
-              <div><strong>Aditi → Chandigarh</strong><small>4:45 PM · 2 seats</small></div>
-              <button class="btn btn-light" onclick="showToast('Carpool request sent to Aditi.')">Join</button>
-            </div>
-            <div class="transport-option">
-              <div><strong>Rohan → Zirakpur</strong><small>5:15 PM · 1 seat</small></div>
-              <button class="btn btn-light" onclick="showToast('Carpool request sent to Rohan.')">Join</button>
-            </div>
-            <div class="transport-option">
-              <div><strong>Mehak → Panchkula</strong><small>6:00 PM · 2 seats</small></div>
-              <button class="btn btn-light" onclick="showToast('Carpool request sent to Mehak.')">Join</button>
-            </div>
+            <p class="eyebrow" style="margin-top:6px">RIDES FOR YOUR EVENTS</p>
+            ${available.length ? available.map(r => `<div class="transport-option"><div><strong>${escapeHtml(r.driverName)} · ${escapeHtml(r.from)}</strong><small>${escapeHtml(eventTitle(r.eventId))} · ${escapeHtml(r.time)} · ${rideSeatsLeft(r)} seat${rideSeatsLeft(r) === 1 ? "" : "s"} · ${r.fare ? "₹" + r.fare + "/seat" : "Free"}</small></div><button class="btn btn-light" onclick="startJoin('${r.id}')">Request</button></div>`).join("") : `<p class="muted-note">${myRegEvents().length ? (transportOptions().length ? "No open rides for your events yet." : "Transport is already arranged for your events.") : "Register for an event to see rides."}</p>`}
           </div>
+        </article>
+      </div>
 
-          <button class="btn btn-lime" style="margin-top:15px" onclick="showToast('Your carpool listing has been created.')">Offer a seat +</button>
+      <div class="transport-grid">
+        <article class="soft-card transport-card">
+          <p class="eyebrow">MY RIDE REQUESTS</p>
+          <div class="transport-options">
+            ${myRequests.length ? myRequests.map(({ ride, req }) => `<div class="transport-option"><div><strong>${escapeHtml(ride.driverName)} → ${escapeHtml(eventTitle(ride.eventId))}</strong><small>${escapeHtml(ride.from)} · ${escapeHtml(ride.time)} · <span class="status ${req.status}">${req.status}</span>${req.status === "accepted" ? " · Driver: " + escapeHtml(ride.phone) : ""}</small></div><button class="btn btn-light" onclick="cancelRequest('${ride.id}')">Cancel</button></div>`).join("") : `<p class="muted-note">You haven't requested any rides.</p>`}
+          </div>
+        </article>
+        <article class="soft-card transport-card">
+          <p class="eyebrow">MY RIDE OFFERS</p>
+          <div class="transport-options">
+            ${myOffers.length ? myOffers.map(r => `<div class="offer-block"><div class="transport-option"><div><strong>${escapeHtml(eventTitle(r.eventId))}</strong><small>${escapeHtml(r.from)} · ${escapeHtml(r.time)} · ${rideSeatsLeft(r)}/${r.seats} seats left</small></div><button class="btn btn-light" onclick="cancelOffer('${r.id}')">Cancel ride</button></div>
+              ${r.requests.map(q => `<div class="people-row"><div><strong>${escapeHtml(q.name)}</strong><small>${escapeHtml(q.phone)}${q.note ? " · " + escapeHtml(q.note) : ""}</small></div>${q.status === "pending" ? `<span><button class="btn btn-dark" onclick="answerRequest('${r.id}','${q.uid}',true)">Accept</button> <button class="btn btn-outline" onclick="answerRequest('${r.id}','${q.uid}',false)">Decline</button></span>` : `<span class="status ${q.status}">${q.status}</span>`}</div>`).join("")}</div>`).join("") : `<p class="muted-note">You haven't offered any rides.</p>`}
+          </div>
         </article>
       </div>
     </section>
   `;
 }
 
+function renderTransportOrganiser() {
+  const mine = events.filter(isOwnEvent), bookings = readBookings(), rides = readRides();
+  return `
+    <section class="page">
+      <div class="page-header"><div><p class="eyebrow">GET THERE</p><h1>Transport<br><span>demand.</span></h1></div><p>See how many participants reserved college bus seats or are sharing rides to your events.</p></div>
+      ${mine.length ? `<div class="table-shell"><table class="data-table"><thead><tr><th>Event</th>${BUS_ROUTES.map(r => `<th>Bus ${r.id}</th>`).join("")}<th>Carpools</th></tr></thead><tbody>
+        ${mine.map(e => `<tr><td><strong>${escapeHtml(e.title)}</strong></td>${BUS_ROUTES.map(r => `<td>${bookings.filter(b => b.eventId === e.id && b.routeId === r.id).length} / ${r.capacity}</td>`).join("")}<td>${rides.filter(r => r.eventId === e.id).length} offered</td></tr>`).join("")}
+      </tbody></table></div>` : `<div class="soft-card empty-card"><p class="eyebrow">NO EVENTS YET</p><h3>Create an event to see transport demand.</h3><button class="btn btn-dark" onclick="navigate('create')">Create an event ↗</button></div>`}
+    </section>`;
+}
+
+/* ----- Bus wizard ----- */
+const BUS_STEPS = ["Event", "Route", "Details", "Confirm"];
+function startBus() {
+  const options = transportOptions();
+  if (!options.length) { openModal(noEventsHtml("BUS RESERVATION")); return; }
+  const u = currentUser();
+  tw = { kind: "bus", step: 1, eventId: options[0].id, routeId: "", name: u.name || "", phone: "" };
+  renderBusStep();
+}
+function busBody() {
+  const ev = events.find(e => e.id === tw.eventId);
+  if (tw.step === 1) {
+    return `<h2>Which event are you travelling to?</h2><p class="muted-note">Only events without a bus seat or carpool are listed.</p><div class="choice-list">${transportOptions().map(e => `<label class="choice"><input type="radio" name="ev" value="${e.id}" ${e.id === tw.eventId ? "checked" : ""}><div><strong>${escapeHtml(e.title)}</strong><small>${escapeHtml(e.date)} · ${escapeHtml(e.time)} · ${escapeHtml(e.venue)}</small></div></label>`).join("")}</div>`;
+  }
+  if (tw.step === 2) return `<h2>Choose your route</h2><div class="choice-list">${BUS_ROUTES.map(r => { const left = seatsLeftBus(tw.eventId, r.id); return `<label class="choice ${left ? "" : "disabled"}"><input type="radio" name="rt" value="${r.id}" ${tw.routeId === r.id ? "checked" : ""} ${left ? "" : "disabled"}><div><strong>${r.name}</strong><small>Departs ${r.time} · ${left ? left + " seats left" : "Full"}</small></div></label>`; }).join("")}</div>`;
+  if (tw.step === 3) return `<h2>Your details</h2><label class="form-field"><span>Full name</span><input id="twName" value="${escapeHtml(tw.name)}" placeholder="Your name"></label><label class="form-field"><span>Phone number</span><input id="twPhone" value="${escapeHtml(tw.phone)}" inputmode="numeric" placeholder="10 digit mobile number"></label>`;
+  const rt = BUS_ROUTES.find(r => r.id === tw.routeId);
+  return `<h2>Review and confirm</h2><div class="detail-list"><div class="detail-row"><span>Event</span><strong>${escapeHtml(ev.title)}</strong></div><div class="detail-row"><span>Route</span><strong>${rt.name}</strong></div><div class="detail-row"><span>Departure</span><strong>${rt.time}</strong></div><div class="detail-row"><span>Passenger</span><strong>${escapeHtml(tw.name)}</strong></div><div class="detail-row"><span>Phone</span><strong>${escapeHtml(tw.phone)}</strong></div></div>`;
+}
+function renderBusStep() {
+  openModal(`<p class="eyebrow">BUS RESERVATION</p>${stepper(BUS_STEPS, tw.step)}${busBody()}<p class="wizard-error" id="wizError" hidden></p><div class="modal-actions-row">${tw.step > 1 ? `<button class="btn btn-outline" onclick="busBack()">Back</button>` : ""}<button class="btn btn-dark" onclick="busNext()">${tw.step === 4 ? "Confirm reservation ↗" : "Next →"}</button></div>`);
+}
+function busBack() { tw.step--; renderBusStep(); }
+function busNext() {
+  if (tw.step === 1) tw.eventId = Number(document.querySelector('input[name=ev]:checked')?.value || tw.eventId);
+  if (tw.step === 2) { const v = document.querySelector('input[name=rt]:checked')?.value; if (!v) return wizardError("Choose a route to continue."); tw.routeId = v; }
+  if (tw.step === 3) {
+    tw.name = document.getElementById("twName").value.trim(); tw.phone = document.getElementById("twPhone").value.trim();
+    if (!tw.name) return wizardError("Enter your name."); if (!validPhone(tw.phone)) return wizardError("Enter a valid 10 digit phone number.");
+  }
+  if (tw.step === 4) return confirmBus();
+  tw.step++; renderBusStep();
+}
+function confirmBus() {
+  if (myTransport(tw.eventId).any) { showToast("Transport is already arranged for this event."); closeModal(); return renderCurrentPage(); }
+  if (seatsLeftBus(tw.eventId, tw.routeId) < 1) { tw.step = 2; tw.routeId = ""; renderBusStep(); wizardError("That route just filled up. Choose another."); return; }
+  const list = readBookings(), id = `BUS-${Date.now().toString().slice(-6)}`;
+  list.push({ id, uid: currentUid(), eventId: tw.eventId, routeId: tw.routeId, name: tw.name, phone: tw.phone, createdAt: new Date().toISOString() });
+  writeList("campuslyBusBookings", list);
+  const rt = BUS_ROUTES.find(r => r.id === tw.routeId);
+  pushNotification(currentUid(), "attendee", "Bus seat reserved", `${rt.name} at ${rt.time} for ${eventTitle(tw.eventId)}.`);
+  openModal(`<div class="registration-success"><div class="success-mark">✓</div><p class="eyebrow">SEAT RESERVED</p><h2>You're on the bus.</h2><p>${rt.name}, departing ${rt.time}, for ${escapeHtml(eventTitle(tw.eventId))}.</p><p><strong>Booking ID: ${id}</strong></p><div class="success-actions"><button class="btn btn-dark" onclick="closeModal();renderCurrentPage()">Done</button></div></div>`);
+}
+function cancelBus(id) { writeList("campuslyBusBookings", readBookings().filter(b => b.id !== id)); showToast("Bus reservation cancelled."); renderCurrentPage(); }
+
+/* ----- Carpool: offer wizard ----- */
+const OFFER_STEPS = ["Event", "Trip", "Contact", "Publish"];
+function startOffer() {
+  const options = transportOptions();
+  if (!options.length) { openModal(noEventsHtml("OFFER A RIDE")); return; }
+  tw = { kind: "offer", step: 1, eventId: options[0].id, from: "", time: "", seats: 2, fare: 0, name: currentUser().name || "", phone: "", vehicle: "" };
+  renderOfferStep();
+}
+function offerBody() {
+  if (tw.step === 1) return `<h2>Which event are you driving to?</h2><p class="muted-note">Only events without a bus seat or carpool are listed.</p><div class="choice-list">${transportOptions().map(e => `<label class="choice"><input type="radio" name="ev" value="${e.id}" ${e.id === tw.eventId ? "checked" : ""}><div><strong>${escapeHtml(e.title)}</strong><small>${escapeHtml(e.date)} · ${escapeHtml(e.venue)}</small></div></label>`).join("")}</div>`;
+  if (tw.step === 2) return `<h2>Trip details</h2><label class="form-field"><span>Pickup area</span><input id="twFrom" value="${escapeHtml(tw.from)}" placeholder="e.g. Sarabha Nagar"></label><label class="form-field"><span>Departure time</span><input id="twTime" type="time" value="${tw.time}"></label><label class="form-field"><span>Seats available</span><select id="twSeats">${[1, 2, 3, 4, 5, 6].map(n => `<option ${n === tw.seats ? "selected" : ""}>${n}</option>`).join("")}</select></label><label class="form-field"><span>Cost share per seat (₹, 0 for free)</span><input id="twFare" type="number" min="0" max="2000" value="${tw.fare}"></label>`;
+  if (tw.step === 3) return `<h2>Contact details</h2><p class="muted-note">Shared only with riders you accept.</p><label class="form-field"><span>Your name</span><input id="twName" value="${escapeHtml(tw.name)}"></label><label class="form-field"><span>Phone number</span><input id="twPhone" value="${escapeHtml(tw.phone)}" inputmode="numeric" placeholder="10 digit mobile number"></label><label class="form-field"><span>Vehicle (optional)</span><input id="twVehicle" value="${escapeHtml(tw.vehicle)}" placeholder="e.g. White Swift, PB10 AB 1234"></label>`;
+  return `<h2>Review and publish</h2><div class="detail-list"><div class="detail-row"><span>Event</span><strong>${escapeHtml(eventTitle(tw.eventId))}</strong></div><div class="detail-row"><span>Pickup</span><strong>${escapeHtml(tw.from)}</strong></div><div class="detail-row"><span>Departure</span><strong>${escapeHtml(tw.time)}</strong></div><div class="detail-row"><span>Seats</span><strong>${tw.seats}</strong></div><div class="detail-row"><span>Cost share</span><strong>${tw.fare ? "₹" + tw.fare + " per seat" : "Free"}</strong></div><div class="detail-row"><span>Contact</span><strong>${escapeHtml(tw.name)} · ${escapeHtml(tw.phone)}</strong></div></div>`;
+}
+function renderOfferStep() {
+  openModal(`<p class="eyebrow">CARPOOL · OFFER A RIDE</p>${stepper(OFFER_STEPS, tw.step)}${offerBody()}<p class="wizard-error" id="wizError" hidden></p><div class="modal-actions-row">${tw.step > 1 ? `<button class="btn btn-outline" onclick="tw.step--;renderOfferStep()">Back</button>` : ""}<button class="btn btn-dark" onclick="offerNext()">${tw.step === 4 ? "Publish ride ↗" : "Next →"}</button></div>`);
+}
+function offerNext() {
+  if (tw.step === 1) tw.eventId = Number(document.querySelector('input[name=ev]:checked')?.value || tw.eventId);
+  if (tw.step === 2) {
+    tw.from = document.getElementById("twFrom").value.trim(); tw.time = document.getElementById("twTime").value; tw.seats = Number(document.getElementById("twSeats").value); tw.fare = Math.max(0, Number(document.getElementById("twFare").value) || 0);
+    if (!tw.from) return wizardError("Enter a pickup area."); if (!tw.time) return wizardError("Choose a departure time.");
+  }
+  if (tw.step === 3) {
+    tw.name = document.getElementById("twName").value.trim(); tw.phone = document.getElementById("twPhone").value.trim(); tw.vehicle = document.getElementById("twVehicle").value.trim();
+    if (!tw.name) return wizardError("Enter your name."); if (!validPhone(tw.phone)) return wizardError("Enter a valid 10 digit phone number.");
+  }
+  if (tw.step === 4) {
+    const list = readRides();
+    list.unshift({ id: `RIDE-${Date.now().toString().slice(-6)}`, uid: currentUid(), driverName: tw.name, phone: tw.phone, vehicle: tw.vehicle, eventId: tw.eventId, from: tw.from, time: tw.time, seats: tw.seats, fare: tw.fare, requests: [] });
+    writeList("campuslyRides", list);
+    pushNotification(currentUid(), "attendee", "Ride published", `Your ride to ${eventTitle(tw.eventId)} is open for requests.`);
+    openModal(`<div class="registration-success"><div class="success-mark">✓</div><p class="eyebrow">RIDE PUBLISHED</p><h2>Your ride is live.</h2><p>Classmates registered for ${escapeHtml(eventTitle(tw.eventId))} can now request a seat. You'll be notified and can accept or decline each request.</p><div class="success-actions"><button class="btn btn-dark" onclick="closeModal();renderCurrentPage()">Done</button></div></div>`);
+    return;
+  }
+  tw.step++; renderOfferStep();
+}
+
+/* ----- Carpool: request wizard ----- */
+const JOIN_STEPS = ["Ride", "Your details", "Send"];
+function startJoin(rideId) {
+  const ride = readRides().find(r => r.id === rideId);
+  if (!ride || rideSeatsLeft(ride) < 1) { showToast("This ride is no longer available."); return; }
+  const t = myTransport(ride.eventId);
+  if (t.bus) { showToast("You've reserved a bus seat for this event. Cancel it to carpool instead."); return; }
+  if (t.carpool) { showToast("You've already arranged a carpool for this event."); return; }
+  tw = { kind: "join", step: 1, rideId, name: currentUser().name || "", phone: "", note: "" };
+  renderJoinStep();
+}
+function joinBody(ride) {
+  if (tw.step === 1) return `<h2>Ride details</h2><div class="detail-list"><div class="detail-row"><span>Driver</span><strong>${escapeHtml(ride.driverName)}</strong></div><div class="detail-row"><span>Event</span><strong>${escapeHtml(eventTitle(ride.eventId))}</strong></div><div class="detail-row"><span>Pickup</span><strong>${escapeHtml(ride.from)}</strong></div><div class="detail-row"><span>Departure</span><strong>${escapeHtml(ride.time)}</strong></div><div class="detail-row"><span>Seats left</span><strong>${rideSeatsLeft(ride)}</strong></div><div class="detail-row"><span>Cost share</span><strong>${ride.fare ? "₹" + ride.fare + " per seat" : "Free"}</strong></div>${ride.vehicle ? `<div class="detail-row"><span>Vehicle</span><strong>${escapeHtml(ride.vehicle)}</strong></div>` : ""}</div>`;
+  if (tw.step === 2) return `<h2>Your details</h2><label class="form-field"><span>Your name</span><input id="twName" value="${escapeHtml(tw.name)}"></label><label class="form-field"><span>Phone number</span><input id="twPhone" value="${escapeHtml(tw.phone)}" inputmode="numeric" placeholder="10 digit mobile number"></label><label class="form-field"><span>Note to driver (optional)</span><input id="twNote" value="${escapeHtml(tw.note)}" placeholder="e.g. I'll wait at the main gate"></label>`;
+  return `<h2>Send your request</h2><p>${escapeHtml(ride.driverName)} will review it. You'll get a notification when they accept or decline, and you'll see their phone number once accepted.</p><div class="detail-list"><div class="detail-row"><span>You</span><strong>${escapeHtml(tw.name)} · ${escapeHtml(tw.phone)}</strong></div>${tw.note ? `<div class="detail-row"><span>Note</span><strong>${escapeHtml(tw.note)}</strong></div>` : ""}</div>`;
+}
+function renderJoinStep() {
+  const ride = readRides().find(r => r.id === tw.rideId); if (!ride) return closeModal();
+  openModal(`<p class="eyebrow">CARPOOL · REQUEST A SEAT</p>${stepper(JOIN_STEPS, tw.step)}${joinBody(ride)}<p class="wizard-error" id="wizError" hidden></p><div class="modal-actions-row">${tw.step > 1 ? `<button class="btn btn-outline" onclick="tw.step--;renderJoinStep()">Back</button>` : ""}<button class="btn btn-dark" onclick="joinNext()">${tw.step === 3 ? "Send request ↗" : "Next →"}</button></div>`);
+}
+function joinNext() {
+  if (tw.step === 2) {
+    tw.name = document.getElementById("twName").value.trim(); tw.phone = document.getElementById("twPhone").value.trim(); tw.note = document.getElementById("twNote").value.trim();
+    if (!tw.name) return wizardError("Enter your name."); if (!validPhone(tw.phone)) return wizardError("Enter a valid 10 digit phone number.");
+  }
+  if (tw.step === 3) {
+    const list = readRides(), ride = list.find(r => r.id === tw.rideId);
+    if (!ride || rideSeatsLeft(ride) < 1 || myTransport(ride.eventId).any) { showToast("This ride is no longer available to you."); closeModal(); return renderCurrentPage(); }
+    if (!ride.requests.some(q => q.uid === currentUid())) ride.requests.push({ uid: currentUid(), name: tw.name, phone: tw.phone, note: tw.note, status: "pending" });
+    writeList("campuslyRides", list);
+    pushNotification(ride.uid, "attendee", "New ride request", `${tw.name} asked for a seat to ${eventTitle(ride.eventId)}.`);
+    openModal(`<div class="registration-success"><div class="success-mark">✓</div><p class="eyebrow">REQUEST SENT</p><h2>Waiting for ${escapeHtml(ride.driverName)}.</h2><p>Track the status under "My ride requests".</p><div class="success-actions"><button class="btn btn-dark" onclick="closeModal();renderCurrentPage()">Done</button></div></div>`);
+    return;
+  }
+  tw.step++; renderJoinStep();
+}
+function answerRequest(rideId, uid, accept) {
+  const list = readRides(), ride = list.find(r => r.id === rideId), q = ride && ride.requests.find(x => x.uid === uid);
+  if (!q || q.status !== "pending") return;
+  if (accept && rideSeatsLeft(ride) < 1) { showToast("No seats left."); return; }
+  q.status = accept ? "accepted" : "declined";
+  writeList("campuslyRides", list);
+  pushNotification(uid, "attendee", accept ? "Ride request accepted" : "Ride request declined", `${ride.driverName} ${accept ? "accepted" : "declined"} your request for ${eventTitle(ride.eventId)}.`);
+  renderCurrentPage();
+}
+function cancelRequest(rideId) {
+  const list = readRides(), ride = list.find(r => r.id === rideId); if (!ride) return;
+  ride.requests = ride.requests.filter(q => q.uid !== currentUid());
+  writeList("campuslyRides", list); showToast("Ride request cancelled."); renderCurrentPage();
+}
+function cancelOffer(rideId) {
+  const ride = readRides().find(r => r.id === rideId); if (!ride) return;
+  ride.requests.filter(q => q.status !== "declined").forEach(q => pushNotification(q.uid, "attendee", "Ride cancelled", `${ride.driverName} cancelled the ride to ${eventTitle(ride.eventId)}.`));
+  writeList("campuslyRides", readRides().filter(r => r.id !== rideId)); showToast("Ride cancelled."); renderCurrentPage();
+}
+
 /* ---------- WALLET ---------- */
 
 function renderWallet() {
   const activePasses = events.filter(event => registrations.includes(event.id));
-  const userName = getUserName() || "Aarav Sharma";
+  const userName = getUserName() || "Participant";
   const userId = getUserId();
   const level = getEventLevel(attendanceStats.attended);
 
@@ -971,7 +1445,8 @@ function renderWallet() {
 
       <div class="section-label certificate-heading">CERTIFICATES</div>
       <div class="certificate-list">
-        ${certificates.map(certificate => `<article class="soft-card certificate"><div class="certificate-icon">✦</div><div><h3>${certificate.event}</h3><p>${certificate.type} · ${certificate.date}</p></div><button class="btn btn-outline" onclick="showCertificate('${certificate.event}')">View</button></article>`).join("")}
+        ${certificates.length === 0 ? `<div class="soft-card" style="padding:28px;text-align:center"><p class="eyebrow">NO CERTIFICATES YET</p><p style="color:#777;margin-top:8px">Certificates you earn at events will appear here.</p></div>` : ""}
+        ${certificates.map(certificate => `<article class="soft-card certificate"><div class="certificate-icon">✦</div><div><h3>${certificate.event}</h3><p>${certificate.type} · ${certificate.date}</p></div><button class="btn btn-outline" onclick="showCertificate(${certificate.eventId})">View</button></article>`).join("")}
       </div>
     </section>
   `;
@@ -982,38 +1457,17 @@ function getUserId() {
   return user?.id || "CLY-2026-042";
 }
 
-function qrMarkup(seed) {
-  const size = 21;
-  const cells = [];
-  const finder = (x, y) => {
-    for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++) {
-      const edge = r === 0 || r === 6 || c === 0 || c === 6;
-      const center = r >= 2 && r <= 4 && c >= 2 && c <= 4;
-      cells.push(`<rect x="${(x+c)*10}" y="${(y+r)*10}" width="10" height="10" class="${edge || center ? 'qr-on' : 'qr-off'}"/>`);
-    }
-  };
-  const reserved = (x, y) => (x < 8 && y < 8) || (x > 12 && y < 8) || (x < 8 && y > 12);
-  finder(0,0); finder(14,0); finder(0,14);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      if (reserved(x,y)) continue;
-      const on = ((x*17 + y*31 + seed*19 + x*y*7) % 11) < 5;
-      cells.push(`<rect x="${x*10}" y="${y*10}" width="10" height="10" class="${on ? 'qr-on' : 'qr-off'}"/>`);
-    }
-  }
-  return `<div class="mini-qr" aria-label="QR code"><svg viewBox="0 0 210 210" role="img" aria-label="Dummy QR code"><rect width="210" height="210" fill="#fff"/>${cells.join("")}</svg></div>`;
-}
 
 function renderMiniPass(event, userName, userId, index) {
   const details = registrationDetails[event.id] || {};
   const isTeam = details.mode === "team";
-  const passNo = `CP-${String(event.id).padStart(2,"0")}-${String(userId).slice(-3)}`;
+  const passNo = passNoFor(event.id);
   return `
     <button class="wallet-pass-card ${index === 0 ? 'wallet-pass-main' : ''}" style="--pass-index:${index}" onclick="selectWalletPass(this, ${event.id})" aria-label="Open ${event.title} pass">
       <div class="wallet-pass-top"><span>${event.category}</span><b>${isTeam ? 'TEAM' : 'INDIVIDUAL'}</b></div>
       <div class="wallet-pass-content">
         <div class="wallet-pass-copy"><small>CAMPUSLY EVENT PASS</small><h2>${event.title}</h2><p>${event.date} · ${event.time}</p><p>${event.venue}</p></div>
-        <div class="wallet-pass-qr-wrap" onclick="event.stopPropagation();showPass(${event.id})" role="button" tabindex="0" aria-label="View QR for ${event.title}">${qrMarkup(event.id)}<span>VIEW QR</span></div>
+        <div class="wallet-pass-qr-wrap" onclick="event.stopPropagation();showPass(${event.id})" role="button" tabindex="0" aria-label="View QR for ${event.title}">${qrMarkup(qrPayload(passNo))}<span>VIEW QR</span></div>
       </div>
       <div class="wallet-pass-meta"><span>${userName}</span><span>${passNo}</span><span>ACTIVE</span></div>
     </button>
@@ -1178,16 +1632,16 @@ function showPass(id) {
   const userName = getUserName() || "Aarav Sharma";
   const userId = getUserId();
   const isTeam = details.mode === "team";
-  const passNo = `CP-${String(event.id).padStart(2,"0")}-${String(userId).slice(-3)}`;
+  const passNo = passNoFor(event.id);
   document.getElementById("modalContent").innerHTML = `
     <div class="scan-pass-modal">
       <div class="scan-pass-head"><div><p class="eyebrow">CAMPUSLY WALLET</p><h2>${event.title}</h2><p>${event.date} · ${event.time} · ${event.venue}</p></div><span class="pass-live">ACTIVE</span></div>
       <div class="scan-pass-body">
         <div class="scan-pass-info"><span>PASS HOLDER</span><strong>${userName}</strong><span>STUDENT ID</span><strong>${userId}</strong><span>PASS NO.</span><strong>${passNo}</strong><span>ENTRY</span><strong>${isTeam ? `TEAM · ${details.teamName || 'REGISTERED'}` : 'INDIVIDUAL'}</strong></div>
-        <div class="scan-qr-large">${qrMarkup(event.id + 5)}</div>
+        <div class="scan-qr-large">${qrMarkup(qrPayload(passNo))}</div>
       </div>
-      <p class="scan-note">Ye QR event entry par scan karne ke liye ready hai. Organizer scanner isi pass ID se match karega.</p>
-      <div class="pass-preview-actions"><button class="btn btn-dark" onclick="closeModal();showToast('Pass opened for scanning.')">Ready to scan ↗</button><button class="btn btn-outline" onclick="closeModal();navigate('scanner')">Open scanner ↗</button></div>
+      <p class="scan-note">Show this QR at event entry. The organizer scans it to mark your attendance. If scanning fails, they can type your pass ID instead.</p>
+      <div class="pass-preview-actions"><button class="btn btn-dark" onclick="closeModal()">Done</button></div>
     </div>
   `;
   document.getElementById("modal").classList.remove("hidden");
@@ -1202,7 +1656,9 @@ function getEventLevel(attended) {
 }
 
 function renderGallery() {
-  const selectedEvent = selectedGalleryEventId ? events.find(event => event.id === selectedGalleryEventId) : null;
+  const org = currentRole === "organiser";
+  const allowed = galleryEvents();
+  const selectedEvent = selectedGalleryEventId ? allowed.find(event => event.id === selectedGalleryEventId) : null;
 
   if (selectedEvent) {
     return renderGalleryEventAlbum(selectedEvent);
@@ -1213,12 +1669,13 @@ function renderGallery() {
       <div class="page-header">
         <div><p class="eyebrow">CAMPUS MOMENTS</p><h1>Event<br><span>gallery.</span></h1></div>
         <div class="gallery-header-actions">
-          <p>Choose an event to open its album. Team members can upload moments to the selected event, and every photo can be downloaded from the album.</p>
+          <p>${org ? "Albums for the events you created." : "Albums for the events you have registered for."} Open one to upload moments or download photos.</p>
         </div>
       </div>
 
+      ${allowed.length ? "" : `<div class="soft-card empty-card"><p class="eyebrow">NO ALBUMS YET</p><h3>${org ? "Albums appear once you create an event." : "Albums appear once you register for an event."}</h3><button class="btn btn-dark" onclick="navigate('${org ? "create" : "events"}')">${org ? "Create an event" : "Explore events"} ↗</button></div>`}
       <div class="gallery-event-grid">
-        ${events.map((event, index) => {
+        ${allowed.map((event, index) => {
           const count = galleryItems.filter(item => Number(item.eventId) === Number(event.id)).length;
           return `
             <button class="gallery-event-card ${index % 3 === 1 ? 'gallery-event-card-tall' : ''}" onclick="openGalleryEvent(${event.id})">
@@ -1277,7 +1734,7 @@ function renderGalleryEventAlbum(event) {
             <div class="gallery-image-wrap"><img src="${item.src}" alt="${item.title}" loading="lazy"><div class="gallery-overlay"><span>${item.caption || 'Campusly moment'}</span></div></div>
             <div class="gallery-info">
               <div><small>${item.demo ? 'TEAM MOMENT' : 'UPLOADED BY TEAM MEMBER'}</small><h3>${item.title || 'Campus moment'}</h3><p class="gallery-uploader">Uploaded by ${item.teamMember || 'Team member'}</p></div>
-              <div class="gallery-actions"><button class="btn btn-outline" onclick="downloadGalleryImage('${item.id}')">Download</button><button class="btn btn-outline" onclick="shareGallery('LinkedIn', '${(item.title || 'Campus moment').replace(/'/g, "\\'")}')">LinkedIn</button><button class="btn btn-outline" onclick="shareGallery('Instagram', '${(item.title || 'Campus moment').replace(/'/g, "\\'")}')">Instagram</button></div>
+              <div class="gallery-actions"><button class="btn btn-outline" onclick="downloadGalleryImage('${item.id}')">Download</button>${canDeletePhoto(item, event) ? `<button class="btn btn-outline btn-danger" onclick="deleteGalleryItem('${item.id}')">Delete</button>` : ""}<button class="btn btn-outline" onclick="shareGallery('LinkedIn', '${(item.title || 'Campus moment').replace(/'/g, "\\'")}')">LinkedIn</button><button class="btn btn-outline" onclick="shareGallery('Instagram', '${(item.title || 'Campus moment').replace(/'/g, "\\'")}')">Instagram</button></div>
             </div>
           </article>
         `).join('') : `
@@ -1310,7 +1767,8 @@ function handleGalleryUpload(event, eventId = null) {
     return;
   }
 
-  const teamMember = prompt('Team member name:', 'Campusly Team') || 'Campusly Team';
+  if (!galleryEvents().some(item => item.id === targetEventId)) { showToast('You can only add photos to your own events.'); return; }
+  const teamMember = getUserName() || 'Campusly member';
   const pending = files.filter(file => file.type.startsWith('image/'));
   if (!pending.length) return showToast('Please choose an image file.');
 
@@ -1332,6 +1790,7 @@ function handleGalleryUpload(event, eventId = null) {
         title: file.name.replace(/\.[^/.]+$/, ''),
         caption: targetEvent ? `${targetEvent.title} · Team upload` : 'Uploaded from your device',
         teamMember,
+        uid: currentUid(),
         demo: false
       });
       remaining -= 1;
@@ -1344,6 +1803,21 @@ function handleGalleryUpload(event, eventId = null) {
     };
     reader.readAsDataURL(file);
   });
+}
+
+function canDeletePhoto(item, event) {
+  if (item.demo) return false;
+  return !item.uid || item.uid === currentUid() || isOwnEvent(event);
+}
+
+function deleteGalleryItem(id) {
+  const item = findGalleryItem(id), event = item && events.find(e => e.id === Number(item.eventId));
+  if (!item || !event || !galleryEvents().some(e => e.id === event.id) || !canDeletePhoto(item, event)) { showToast("You can't delete this photo."); return; }
+  if (!confirm("Delete this photo from the album? This can't be undone.")) return;
+  galleryItems = galleryItems.filter(g => g.id !== id);
+  saveData("campuslyGalleryItems", galleryItems);
+  renderCurrentPage();
+  showToast("Photo deleted.");
 }
 
 function findGalleryItem(id) {
@@ -1408,77 +1882,156 @@ function shareGallery(platform, title) {
 }
 
 function renderScanner() {
-  const currentUserId = getUserId();
-  const examplePass = `CP-${String(registrations[0] || 2).padStart(2, '0')}-${String(currentUserId).slice(-3)}`;
   return `
     <section class="page scanner-page">
       <div class="page-header">
-        <div><p class="eyebrow">ORGANISER TOOL</p><h1>Scan a<br><span>pass.</span></h1></div>
-        <p>Enter a pass ID or student ID to simulate the QR validation flow. The demo matches the same ID used on the generated wallet pass.</p>
+        <div><p class="eyebrow">ORGANIZER TOOL</p><h1>Scan a<br><span>pass.</span></h1></div>
+        <p>Point the camera at a participant's QR pass, upload a picture of it, or type the pass ID. Passes for events you created and for campus-run events are accepted; a valid scan marks attendance.</p>
       </div>
-
       <div class="scanner-layout">
         <article class="scanner-panel soft-card">
-          <div class="scanner-frame"><div class="scanner-corner top-left"></div><div class="scanner-corner top-right"></div><div class="scanner-corner bottom-left"></div><div class="scanner-corner bottom-right"></div><div class="scanner-line"></div><div class="scanner-center">QR</div></div>
-          <p class="eyebrow">DEMO SCANNER</p>
+          <div class="scanner-frame"><video id="scannerVideo" playsinline muted></video><div class="scanner-corner top-left"></div><div class="scanner-corner top-right"></div><div class="scanner-corner bottom-left"></div><div class="scanner-corner bottom-right"></div><div class="scanner-line"></div><div class="scanner-center" id="scannerIdleMark">QR</div></div>
+          <p class="eyebrow">PASS SCANNER</p>
           <h2>Verify a Campusly pass</h2>
-          <p>Use a pass number like <strong>${examplePass}</strong> to verify the registered attendee.</p>
-          <div class="scanner-input-row"><input id="scannerPassId" value="${examplePass}" placeholder="CP-02-042" aria-label="Pass ID"><button class="btn btn-dark" onclick="verifyPass()">Check Pass</button></div>
+          <div class="scanner-input-row"><button class="btn btn-outline" id="scannerCamBtn" onclick="toggleScannerCamera()">Start camera</button><button class="btn btn-outline" onclick="document.getElementById('scannerFile').click()">Scan QR image</button><input type="file" id="scannerFile" accept="image/*" hidden onchange="scanImageFile(this)"></div>
+          <p class="scanner-status" id="scannerStatus">Camera is off.</p>
+          <div class="scanner-input-row"><input id="scannerPassId" placeholder="Enter pass ID" aria-label="Pass ID" onkeydown="if(event.key==='Enter')verifyPass()"><button class="btn btn-dark" onclick="verifyPass()">Check pass</button></div>
           <div class="scanner-result" id="scannerResult">${scannerResult ? renderScannerResult(scannerResult) : '<div class="scanner-idle">Waiting for a pass…</div>'}</div>
         </article>
-
-        <aside class="soft-card scanner-info-card">
-          <p class="eyebrow">MATCH RULE</p>
-          <h3>Pass ID ↔ Student ID</h3>
-          <p>The pass format is <strong>CP-[EVENT]-[STUDENT ID]</strong>. It is the same ID shown on the wallet pass and QR preview.</p>
-          <div class="scanner-stats"><div><strong>${attendanceStats.attended}</strong><span>ATTENDED</span></div><div><strong>${attendanceStats.streak}</strong><span>STREAK</span></div><div><strong>${getEventLevel(attendanceStats.attended).name}</strong><span>LEVEL</span></div></div>
-        </aside>
+        <aside class="soft-card scanner-info-card" id="scannerSide">${renderScannerSide()}</aside>
       </div>
     </section>
   `;
 }
 
+function canScan(event) { return isOwnEvent(event) || !event.createdBy; }
+
+function renderScannerSide() {
+  const mine = events.filter(e => isOwnEvent(e) || (canScan(e) && eventRegistry(e.id).length));
+  const rows = mine.map(e => { const r = eventRegistry(e.id); return { e, total: r.length, done: r.filter(x => x.attended).length }; });
+  const recent = readRegistry().filter(r => r.attended && mine.some(e => e.id === r.eventId)).sort((a, b) => (b.attendedAt || "").localeCompare(a.attendedAt || "")).slice(0, 5);
+  return `
+    <p class="eyebrow">CHECK-INS</p>
+    <h3>Your events</h3>
+    ${rows.length ? rows.map(x => `<div class="detail-row"><span>${escapeHtml(x.e.title)}</span><strong>${x.done} / ${x.total}</strong></div>`).join("") : "<p>Create an event to start checking people in.</p>"}
+    <p class="eyebrow" style="margin-top:22px">RECENT</p>
+    ${recent.length ? recent.map(r => `<div class="detail-row"><span>${escapeHtml(r.name)}</span><strong>${timeAgo(r.attendedAt)}</strong></div>`).join("") : "<p>No check-ins yet.</p>"}
+  `;
+}
+
 function renderScannerResult(result) {
   if (!result) return '';
-  if (!result.valid) return `<div class="scanner-result-card invalid"><span>×</span><div><strong>Pass not found</strong><small>${result.message}</small></div></div>`;
-  return `<div class="scanner-result-card valid"><span>✓</span><div><strong>${result.event.title}</strong><small>${result.userName} · ${result.passNo} · ${result.already ? 'Already checked in' : 'Attendance marked'}</small></div><b>VALID</b></div>`;
+  if (!result.valid) return `<div class="scanner-result-card invalid"><span>×</span><div><strong>Pass not accepted</strong><small>${escapeHtml(result.message)}</small></div></div>`;
+  return `<div class="scanner-result-card valid"><span>✓</span><div><strong>${escapeHtml(result.event.title)}</strong><small>${escapeHtml(result.userName)} · ${escapeHtml(result.passNo)} · ${result.already ? 'Already checked in' : 'Attendance marked'}</small></div><b>VALID</b></div>`;
 }
 
-function verifyPass() {
-  const input = document.getElementById('scannerPassId');
-  const value = (input?.value || '').trim().toUpperCase();
-  const match = value.match(/^CP-(\d+)-(\d{3})$/);
-  if (!match) {
-    scannerResult = { valid: false, message: 'Use a pass ID like CP-02-042.' };
-    navigate('scanner');
-    return;
-  }
+let scannerStream = null, scannerTimer = null, scannerLast = { text: "", at: 0 };
 
-  const eventId = Number(match[1]);
-  const studentSuffix = match[2];
-  const event = events.find(item => item.id === eventId);
-  const user = JSON.parse(localStorage.getItem('campuslyUser') || 'null') || {};
-  const currentSuffix = String(getUserId()).slice(-3);
-  if (!event || studentSuffix !== currentSuffix || !registrations.includes(eventId)) {
-    scannerResult = { valid: false, message: 'This demo pass does not match a registered Campusly ID on this device.' };
-    navigate('scanner');
-    return;
-  }
+function setScannerStatus(text) { const el = document.getElementById("scannerStatus"); if (el) el.textContent = text; }
 
-  const recordKey = `${eventId}-${studentSuffix}`;
-  const already = attendanceRecords.includes(recordKey);
-  if (!already) {
-    attendanceRecords.push(recordKey);
-    attendanceStats.attended += 1;
-    attendanceStats.streak += 1;
-    saveData('campuslyAttendanceRecords', attendanceRecords);
-    saveData('campuslyAttendanceStats', attendanceStats);
-  }
+function setupScanner() { window.addEventListener("pagehide", stopScannerCamera); }
 
-  scannerResult = { valid: true, already, event, userName: user.name || getUserName() || 'Aarav Sharma', passNo: value };
-  navigate('scanner');
-  showToast(already ? 'Pass already checked in.' : 'Attendance marked successfully.');
+function loadJsQr() {
+  if (window.jsQR) return Promise.resolve();
+  const urls = ["https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js", "https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"];
+  return urls.reduce((chain, url) => chain.catch(() => new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = url; el.onload = () => (window.jsQR ? resolve() : reject()); el.onerror = reject;
+    document.head.appendChild(el);
+  })), Promise.reject());
 }
+
+// Returns decode(source, width, height) -> text. Uses the browser's native detector when present, else jsQR.
+async function getQrDecoder() {
+  if ("BarcodeDetector" in window) {
+    try {
+      const formats = await BarcodeDetector.getSupportedFormats();
+      if (formats.includes("qr_code")) { const d = new BarcodeDetector({ formats: ["qr_code"] }); return async src => (await d.detect(src))[0]?.rawValue || ""; }
+    } catch (e) {}
+  }
+  await loadJsQr();
+  const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d", { willReadFrequently: true });
+  return async (src, w, h) => {
+    if (!w || !h) return "";
+    const scale = Math.min(1, 800 / Math.max(w, h));
+    canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
+    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const r = window.jsQR(img.data, canvas.width, canvas.height);
+    return r ? r.data : "";
+  };
+}
+
+async function toggleScannerCamera() {
+  if (scannerStream) { stopScannerCamera(); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { setScannerStatus("Camera access needs https or localhost. You can still upload a QR image or type the pass ID."); return; }
+  try {
+    setScannerStatus("Starting camera…");
+    const decode = await getQrDecoder();
+    scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } });
+    const video = document.getElementById("scannerVideo");
+    video.srcObject = scannerStream;
+    await video.play();
+    video.classList.add("live");
+    document.getElementById("scannerIdleMark")?.classList.add("hidden");
+    document.getElementById("scannerCamBtn").textContent = "Stop camera";
+    setScannerStatus("Scanning… hold the QR inside the frame.");
+    scannerTimer = setInterval(async () => {
+      try {
+        const text = await decode(video, video.videoWidth, video.videoHeight);
+        if (text && (text !== scannerLast.text || Date.now() - scannerLast.at > 3000)) { scannerLast = { text, at: Date.now() }; processScan(text); }
+      } catch (e) {}
+    }, 350);
+  } catch (err) {
+    stopScannerCamera();
+    setScannerStatus(err && err.name === "NotAllowedError" ? "Camera permission was denied. Allow it in the browser, or type the pass ID."
+      : err && err.name === "NotFoundError" ? "No camera found on this device. Upload a QR image or type the pass ID."
+      : "Couldn't start the scanner (the QR reader library may be blocked offline). Upload a QR image or type the pass ID.");
+  }
+}
+
+async function scanImageFile(input) {
+  const file = input.files && input.files[0]; input.value = "";
+  if (!file) return;
+  try {
+    const decode = await getQrDecoder(), bmp = await createImageBitmap(file);
+    const text = await decode(bmp, bmp.width, bmp.height);
+    if (text) processScan(text); else { setScannerStatus("No QR code found in that image. Try a clearer picture or type the pass ID."); showToast("No QR code found."); }
+  } catch (e) { setScannerStatus("Couldn't read that image. Type the pass ID instead."); }
+}
+
+function stopScannerCamera() {
+  clearInterval(scannerTimer); scannerTimer = null;
+  if (scannerStream) scannerStream.getTracks().forEach(t => t.stop());
+  scannerStream = null;
+  const video = document.getElementById("scannerVideo");
+  if (video) { video.srcObject = null; video.classList.remove("live"); }
+  document.getElementById("scannerIdleMark")?.classList.remove("hidden");
+  const btn = document.getElementById("scannerCamBtn"); if (btn) btn.textContent = "Start camera";
+  setScannerStatus("Camera is off.");
+}
+
+function verifyPass() { processScan(document.getElementById("scannerPassId")?.value || ""); }
+
+function processScan(raw) {
+  const value = String(raw).trim().replace(/^CAMPUSLY:/i, "").trim().toUpperCase();
+  if (!value) { showToast("Enter or scan a pass ID first."); return; }
+  const entry = readRegistry().find(r => r.passNo.toUpperCase() === value);
+  const event = entry && events.find(e => e.id === entry.eventId);
+  if (!entry || !event) scannerResult = { valid: false, message: "No registration matches this pass ID." };
+  else if (!canScan(event)) scannerResult = { valid: false, message: `This pass is for "${event.title}", which another organizer created.` };
+  else {
+    const already = entry.attended;
+    if (!already) setAttendance(entry.passNo, true);
+    scannerResult = { valid: true, already, event, userName: entry.name, passNo: entry.passNo };
+  }
+  document.getElementById("scannerResult").innerHTML = renderScannerResult(scannerResult);
+  document.getElementById("scannerSide").innerHTML = renderScannerSide();
+  if (scannerResult.valid) { showToast(scannerResult.already ? "Pass already checked in." : "Attendance marked."); const i = document.getElementById("scannerPassId"); if (i) i.value = ""; }
+  else showToast("Pass not accepted.");
+}
+
+
 
 function renderProfile() {
   const user = JSON.parse(localStorage.getItem("campuslyUser") || "null") || {};
@@ -1486,11 +2039,7 @@ function renderProfile() {
     name: user.name || (currentRole === "organiser" ? "Campusly Organizer" : "Campusly Attendee"),
     email: user.email || "demo@campusly.app",
     college: user.college || "Campusly Demo College",
-    department: user.department || (currentRole === "organiser" ? "Student Activities" : "Computer Science"),
-    year: user.year || "3rd Year",
     id: user.id || `CLY-2026-${String(Math.floor(100 + Math.random() * 900))}`,
-    bio: user.bio || "Campusly member exploring events, communities and campus experiences.",
-    interests: user.interests || ["Technology", "Culture", "Design"],
     joined: user.joined || "Aug 2026"
   };
 
@@ -1499,14 +2048,15 @@ function renderProfile() {
     localStorage.setItem("campuslyUser", JSON.stringify(updatedUser));
   }
 
+  const org = currentRole === "organiser";
+  const mine = events.filter(isOwnEvent);
+  const regsIn = mine.flatMap(e => eventRegistry(e.id));
   const activePasses = events.filter(event => registrations.includes(event.id));
   const attendance = Math.max(0, Number(attendanceStats.attended || 0));
   const streak = Math.max(0, Number(attendanceStats.streak || 0));
   const level = attendance >= 25 ? "Campus Legend" : attendance >= 15 ? "Gold Explorer" : attendance >= 8 ? "Silver Explorer" : "Bronze Explorer";
   const levelNext = attendance >= 25 ? "Max level reached" : attendance >= 15 ? `${25 - attendance} more attended events to Campus Legend` : attendance >= 8 ? `${15 - attendance} more attended events to Gold Explorer` : `${8 - attendance} more attended events to Silver Explorer`;
-  const completionFields = [profile.name, profile.email, profile.college, profile.department, profile.year, profile.bio];
-  const completion = Math.round((completionFields.filter(Boolean).length / completionFields.length) * 100);
-  const recent = [
+  const recent = org ? mine.slice(0, 4).map(event => ({ label: "Event created", title: event.title, meta: `${event.date} · ${eventRegistry(event.id).length} registered` })) : [
     ...activePasses.slice(0, 2).map(event => ({ label: "Event pass active", title: event.title, meta: `${event.date} · ${event.venue}` })),
     ...certificates.slice(0, 2).map(certificate => ({ label: "Certificate added", title: certificate.event, meta: `${certificate.type} · ${certificate.date}` }))
   ].slice(0, 4);
@@ -1527,47 +2077,47 @@ function renderProfile() {
             <div class="profile-big-avatar">${profile.name.charAt(0).toUpperCase()}</div>
             <div class="profile-level-badge">
               <span class="profile-level-dot"></span>
-              ${level}
+              ${org ? "Organizer" : level}
             </div>
           </div>
-          <p class="eyebrow">${currentRole.toUpperCase()}</p>
+          <p class="eyebrow">${roleLabel().toUpperCase()}</p>
           <h2>${escapeHtml(profile.name)}</h2>
-          <p class="profile-bio">${escapeHtml(profile.bio)}</p>
           <div class="profile-info-grid">
             <div><span>EMAIL</span><strong>${escapeHtml(profile.email)}</strong></div>
             <div><span>CAMPUSLY ID</span><strong>${escapeHtml(profile.id)}</strong></div>
             <div><span>COLLEGE</span><strong>${escapeHtml(profile.college)}</strong></div>
-            <div><span>DEPARTMENT</span><strong>${escapeHtml(profile.department)}</strong></div>
-            <div><span>YEAR</span><strong>${escapeHtml(profile.year)}</strong></div>
             <div><span>MEMBER SINCE</span><strong>${escapeHtml(profile.joined)}</strong></div>
           </div>
-          <div class="profile-chip-row">${profile.interests.map(item => `<span>${escapeHtml(item)}</span>`).join("")}</div>
           <div class="profile-actions">
             <button class="btn btn-dark" onclick="openEditProfile()">Edit profile</button>
-            <button class="btn btn-outline" onclick="navigate('wallet')">View wallet ↗</button>
+            ${org ? `<button class="btn btn-outline" onclick="navigate('manage')">Manage events ↗</button>` : `<button class="btn btn-outline" onclick="navigate('wallet')">View wallet ↗</button>`}
+          </div>
+          <div class="mode-switch" role="group" aria-label="Switch mode">
+            <span>USING CAMPUSLY AS</span>
+            <button class="${org ? "" : "active"}" onclick="switchMode('attendee')">Participant</button>
+            <button class="${org ? "active" : ""}" onclick="switchMode('organiser')">Organizer</button>
           </div>
         </article>
 
         <div class="profile-right-column">
-          <article class="profile-completion-card">
-            <div class="profile-card-heading"><div><p class="eyebrow">PROFILE HEALTH</p><h3>${completion}% complete</h3></div><span>${completion >= 90 ? 'READY' : 'ADD DETAILS'}</span></div>
-            <div class="profile-progress"><i style="width:${completion}%"></i></div>
-            <p>Complete the profile so your event passes and participation records stay consistent.</p>
-          </article>
-
           <div class="profile-stats profile-stat-grid">
+            ${org ? `
+            <article><strong>${mine.length}</strong><span>EVENTS CREATED</span></article>
+            <article><strong>${regsIn.length}</strong><span>REGISTRATIONS</span></article>
+            <article><strong>${regsIn.filter(r => r.attended).length}</strong><span>CHECKED IN</span></article>
+            <article><strong>${regsIn.filter(r => r.certificate).length}</strong><span>CERTIFICATES ISSUED</span></article>` : `
             <article><strong>${activePasses.length}</strong><span>ACTIVE PASSES</span></article>
             <article><strong>${registrations.length}</strong><span>REGISTRATIONS</span></article>
             <article><strong>${attendance}</strong><span>EVENTS ATTENDED</span></article>
             <article><strong>${streak}</strong><span>CURRENT STREAK</span></article>
-            <article><strong>${certificates.length}</strong><span>CERTIFICATES</span></article>
-            <article><strong>${galleryItems.length}</strong><span>GALLERY POSTS</span></article>
+            <article><strong>${certificates.length}</strong><span>CERTIFICATES</span></article>`}
+            <article><strong>${galleryItems.filter(i => galleryEvents().some(e => e.id === Number(i.eventId))).length}</strong><span>GALLERY PHOTOS</span></article>
           </div>
         </div>
       </div>
 
       <div class="profile-section-grid">
-        <article class="soft-card profile-achievement-card">
+        ${org ? "" : `<article class="soft-card profile-achievement-card">
           <div class="profile-section-heading"><div><p class="eyebrow">ACHIEVEMENT</p><h3>${level}</h3></div><div class="profile-achievement-icon">✦</div></div>
           <p>Attendance-based campus level earned from your participation history.</p>
           <div class="profile-level-track">
@@ -1577,27 +2127,32 @@ function renderProfile() {
             <div class="profile-level-step ${attendance >= 25 ? 'done' : ''}"><span>Legend</span></div>
           </div>
           <small>${levelNext}</small>
-        </article>
+        </article>`}
 
         <article class="soft-card profile-activity-card">
-          <div class="profile-section-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h3>Your campus trail</h3></div></div>
+          <div class="profile-section-heading"><div><p class="eyebrow">${org ? "YOUR EVENTS" : "RECENT ACTIVITY"}</p><h3>${org ? "Recently created" : "Your campus trail"}</h3></div></div>
           <div class="profile-activity-list">
             ${recent.length ? recent.map(item => `
               <div class="profile-activity-item">
                 <span class="profile-activity-dot"></span>
                 <div><small>${escapeHtml(item.label)}</small><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.meta)}</p></div>
               </div>
-            `).join("") : `<div class="profile-empty-activity">Start exploring events to build your activity trail.</div>`}
+            `).join("") : `<div class="profile-empty-activity">${org ? "Create an event to see it here." : "Start exploring events to build your activity trail."}</div>`}
           </div>
         </article>
       </div>
 
       <div class="profile-section-heading profile-quick-heading"><div><p class="eyebrow">QUICK ACCESS</p><h3>Jump back into Campusly</h3></div></div>
       <div class="profile-quick-actions">
+        ${org ? `
+        <button class="soft-card profile-quick-action" onclick="navigate('events')"><span>01</span><strong>My events</strong><small>Events you created</small>↗</button>
+        <button class="soft-card profile-quick-action" onclick="navigate('create')"><span>02</span><strong>Create event</strong><small>Publish a new listing</small>↗</button>
+        <button class="soft-card profile-quick-action" onclick="navigate('scanner')"><span>03</span><strong>Scanner</strong><small>Check passes at the door</small>↗</button>
+        <button class="soft-card profile-quick-action" onclick="navigate('manage')"><span>04</span><strong>Manage</strong><small>Attendance &amp; certificates</small>↗</button>` : `
         <button class="soft-card profile-quick-action" onclick="navigate('events')"><span>01</span><strong>Explore events</strong><small>Find something new</small>↗</button>
         <button class="soft-card profile-quick-action" onclick="navigate('registrations')"><span>02</span><strong>My registrations</strong><small>See upcoming events</small>↗</button>
         <button class="soft-card profile-quick-action" onclick="navigate('gallery')"><span>03</span><strong>My gallery</strong><small>Your event moments</small>↗</button>
-        <button class="soft-card profile-quick-action" onclick="navigate('wallet')"><span>04</span><strong>My passes</strong><small>Open your QR passes</small>↗</button>
+        <button class="soft-card profile-quick-action" onclick="navigate('wallet')"><span>04</span><strong>My passes</strong><small>Open your QR passes</small>↗</button>`}
       </div>
     </section>
   `;
@@ -1613,9 +2168,6 @@ function openEditProfile() {
     name: user.name || (currentRole === "organiser" ? "Campusly Organizer" : "Campusly Attendee"),
     email: user.email || "demo@campusly.app",
     college: user.college || "Campusly Demo College",
-    department: user.department || (currentRole === "organiser" ? "Student Activities" : "Computer Science"),
-    year: user.year || "3rd Year",
-    bio: user.bio || "Campusly member exploring events, communities and campus experiences."
   };
   document.getElementById("modalContent").innerHTML = `
     <p class="eyebrow">PROFILE SETTINGS</p>
@@ -1623,11 +2175,8 @@ function openEditProfile() {
     <form class="profile-edit-form" onsubmit="saveProfile(event)">
       <div class="profile-edit-grid">
         <label><span>Full name</span><input id="profileEditName" value="${escapeHtml(current.name)}" required></label>
-        <label><span>Email</span><input id="profileEditEmail" type="email" value="${escapeHtml(current.email)}" required></label>
+        <label><span>Email</span><input id="profileEditEmail" type="email" value="${escapeHtml(current.email)}" readonly title="Your sign-in email can't be changed here"></label>
         <label><span>College</span><input id="profileEditCollege" value="${escapeHtml(current.college)}" required></label>
-        <label><span>Department</span><input id="profileEditDepartment" value="${escapeHtml(current.department)}"></label>
-        <label><span>Year</span><select id="profileEditYear"><option ${current.year === '1st Year' ? 'selected' : ''}>1st Year</option><option ${current.year === '2nd Year' ? 'selected' : ''}>2nd Year</option><option ${current.year === '3rd Year' ? 'selected' : ''}>3rd Year</option><option ${current.year === '4th Year' ? 'selected' : ''}>4th Year</option><option ${current.year === 'Postgraduate' ? 'selected' : ''}>Postgraduate</option></select></label>
-        <label class="full"><span>Bio</span><textarea id="profileEditBio" rows="4">${escapeHtml(current.bio)}</textarea></label>
       </div>
       <button class="btn btn-dark" type="submit">Save profile</button>
     </form>
@@ -1641,34 +2190,46 @@ function saveProfile(event) {
   const updated = {
     ...user,
     name: document.getElementById("profileEditName").value.trim(),
-    email: document.getElementById("profileEditEmail").value.trim(),
+    email: user.email || document.getElementById("profileEditEmail").value.trim(),
     college: document.getElementById("profileEditCollege").value.trim(),
-    department: document.getElementById("profileEditDepartment").value.trim(),
-    year: document.getElementById("profileEditYear").value,
-    bio: document.getElementById("profileEditBio").value.trim() || "Campusly member exploring events, communities and campus experiences.",
-    role: currentRole,
+    role: user.role || "attendee",
     id: user.id || `CLY-2026-${String(Math.floor(100 + Math.random() * 900))}`,
     joined: user.joined || "Aug 2026"
   };
   localStorage.setItem("campuslyUser", JSON.stringify(updated));
+  if (window.CampuslyAuth) CampuslyAuth.syncProfile(updated);
   updateUserInterface();
   closeModal();
   navigate("profile");
   showToast("Profile updated successfully.");
 }
 
-function showCertificate(name) {
+function showCertificate(eventId) {
+  const cert = certificates.find(c => Number(c.eventId) === Number(eventId));
+  if (!cert) return;
+  const ev = events.find(e => e.id === Number(eventId)) || {};
   document.getElementById("modalContent").innerHTML = `
     <p class="eyebrow">DIGITAL CERTIFICATE</p>
-    <h2>${name}</h2>
-    <p>This demo certificate is stored inside the Campusly wallet. In the full backend version, the organiser can generate and digitally verify the certificate here.</p>
-    <div class="soft-card" style="margin-top:22px;padding:35px;text-align:center;background:#e8eddf">
-      <div class="eyebrow">CERTIFIED PARTICIPANT</div>
-      <div style="font-family:'Space Grotesk';font-size:28px;margin:12px 0">Aarav Sharma</div>
-      <div style="font-size:11px;color:#777">CAMPUSLY · 2026</div>
+    <h2>${escapeHtml(cert.event)}</h2>
+    <div class="soft-card" style="margin-top:22px;padding:35px;text-align:center;background:#e8eddf;color:#171613">
+      <div class="eyebrow">CERTIFICATE OF ${escapeHtml(cert.type).toUpperCase()}</div>
+      <div style="font-family:'Space Grotesk';font-size:28px;margin:12px 0">${escapeHtml(getUserName() || "Participant")}</div>
+      <div style="font-size:12px">${escapeHtml(cert.event)}${ev.organiser ? " · by " + escapeHtml(ev.organiser) : ""}</div>
+      <div style="font-size:11px;color:#777;margin-top:8px">Issued ${escapeHtml(cert.date)} · ${escapeHtml(cert.passNo)}</div>
     </div>
   `;
   document.getElementById("modal").classList.remove("hidden");
+}
+
+function renderCertificatesPage() {
+  return `
+    <section class="page">
+      <div class="page-header"><div><p class="eyebrow">ACHIEVEMENTS</p><h1>Your<br><span>certificates.</span></h1></div><p>Certificates issued by event organizers after you were checked in appear here.</p></div>
+      <div class="certificate-list">
+        ${certificates.length ? certificates.map(c => `<article class="soft-card certificate"><div class="certificate-icon">✦</div><div><h3>${escapeHtml(c.event)}</h3><p>${escapeHtml(c.type)} · ${escapeHtml(c.date)}</p></div><button class="btn btn-outline" onclick="showCertificate(${c.eventId})">View</button></article>`).join("") : `<div class="soft-card empty-card"><p class="eyebrow">NO CERTIFICATES YET</p><h3>Attend an event to earn one.</h3></div>`}
+      </div>
+    </section>
+  `;
 }
 
 /* ---------- ORGANISER ---------- */
@@ -1685,7 +2246,7 @@ function renderCreateEvent() {
       </div>
 
       <div class="form-shell">
-        <form onsubmit="createEvent(event)">
+        <form onsubmit="publishEvent(event)">
           <div class="form-grid">
             <div class="form-field">
               <label>Event name</label>
@@ -1720,9 +2281,9 @@ function renderCreateEvent() {
             </div>
             <div class="form-field">
               <label>Registration type</label>
-              <select id="newRegistrationMode"><option value="individual">Individual</option><option value="team">Team</option></select>
+              <select id="newRegistrationMode" onchange="toggleTeamRange()"><option value="individual">Individual</option><option value="team">Team</option></select>
             </div>
-            <div class="form-field" id="teamRangeFields">
+            <div class="form-field hidden" id="teamRangeFields">
               <label>Team size</label>
               <input id="newTeamRange" placeholder="2-4" value="2-4">
             </div>
@@ -1741,7 +2302,12 @@ function renderCreateEvent() {
   `;
 }
 
-function createEvent(event) {
+function toggleTeamRange() {
+  const isTeam = document.getElementById("newRegistrationMode")?.value === "team";
+  document.getElementById("teamRangeFields")?.classList.toggle("hidden", !isTeam);
+}
+
+function publishEvent(event) {
   event.preventDefault();
 
   const category = document.getElementById("newCategory").value;
@@ -1754,6 +2320,18 @@ function createEvent(event) {
     Music: "cover-music"
   };
 
+  const mode = document.getElementById("newRegistrationMode").value;
+  let range = { min: 2, max: 4 };
+  if (mode === "team") {
+    const raw = document.getElementById("newTeamRange").value.trim();
+    const pair = raw.match(/^(\d+)\s*(?:-|–|—|to)\s*(\d+)$/i);
+    const single = raw.match(/^(\d+)$/);
+    if (pair) range = { min: Number(pair[1]), max: Number(pair[2]) };
+    else if (single) range = { min: Number(single[1]), max: Number(single[1]) };
+    else { showToast("Enter the team size as a range like 2-4."); return; }
+    if (range.min < 1 || range.min > range.max) { showToast("Team size range is invalid. Use a range like 2-4."); return; }
+  }
+
   const newEvent = {
     id: Date.now(),
     title: document.getElementById("newTitle").value,
@@ -1763,95 +2341,154 @@ function createEvent(event) {
     venue: document.getElementById("newVenue").value,
     seats: Number(document.getElementById("newSeats").value),
     registered: 0,
-    registrationMode: document.getElementById("newRegistrationMode").value,
-    teamMin: Number((document.getElementById("newTeamRange").value.split("-")[0] || 2)),
-    teamMax: Number((document.getElementById("newTeamRange").value.split("-")[1] || 4)),
+    registrationMode: mode,
+    ...(mode === "team" ? { teamMin: range.min, teamMax: range.max } : {}),
     description: document.getElementById("newDescription").value,
     cover: coverMap[category],
-    organiser: "Campusly Organiser",
+    organiser: getUserName() || "Campusly Organizer",
+    createdBy: currentUid(),
     image: "https://images.unsplash.com/photo-1517457373958-b7bdd4587205?auto=format&fit=crop&w=1000&q=80"
   };
 
   events.unshift(newEvent);
   saveData("campuslyEvents", events);
+  pushNotification(currentUid(), "organiser", "Event published", `${newEvent.title} is now live for registrations.`);
 
   showToast("Event published successfully.");
   navigate("manage");
 }
 
 function renderManage() {
-  const totalParticipants = events.reduce((sum, event) => sum + event.registered, 0);
-  const totalCapacity = events.reduce((sum, event) => sum + event.seats, 0);
-
   return `
     <section class="page">
       <div class="page-header">
         <div>
-          <p class="eyebrow">ORGANISER DASHBOARD</p>
-          <h1>Manage<br><span>the campus.</span></h1>
+          <p class="eyebrow">ORGANIZER DASHBOARD</p>
+          <h1>Manage<br><span>your events.</span></h1>
         </div>
         <button class="btn btn-dark" onclick="navigate('create')">Create new event +</button>
       </div>
-
-      <div class="dashboard-cards">
-        <div class="dashboard-card"><span>Total events</span><strong>${events.length}</strong></div>
-        <div class="dashboard-card"><span>Registrations</span><strong>${totalParticipants}</strong></div>
-        <div class="dashboard-card"><span>Capacity</span><strong>${totalCapacity}</strong></div>
-        <div class="dashboard-card"><span>Fill rate</span><strong>${Math.round((totalParticipants / totalCapacity) * 100)}%</strong></div>
-      </div>
-
-      <div class="section-label">EVENT CONTROL CENTRE</div>
-      <div class="table-shell">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Event</th>
-              <th>Category</th>
-              <th>Date</th>
-              <th>Registrations</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${events.map(event => `
-              <tr>
-                <td><strong>${event.title}</strong><br><span style="color:#999;font-size:9px">${event.venue}</span></td>
-                <td>${event.category}</td>
-                <td>${event.date}</td>
-                <td>${event.registered} / ${event.seats}</td>
-                <td><span class="status">${event.registered >= event.seats ? "Full" : "Live"}</span></td>
-                <td>
-                  <button class="btn btn-outline" onclick="showParticipants(${event.id})">Participants</button>
-                  <button class="btn btn-light" onclick="showToast('Certificate centre opened for ${event.title}.')">Certificates</button>
-                </td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>
+      <div id="manageBody">${renderManageBody()}</div>
     </section>
   `;
 }
 
-function showParticipants(id) {
-  const event = events.find(item => item.id === id);
-  if (!event) return;
-
-  document.getElementById("modalContent").innerHTML = `
-    <p class="eyebrow">PARTICIPANTS · ${event.category}</p>
-    <h2>${event.title}</h2>
-    <p>${event.registered} students are currently registered out of ${event.seats} available places.</p>
-    <div class="detail-list">
-      <div class="detail-row"><span>Registration status</span><strong>${event.registered >= event.seats ? "Full" : "Open"}</strong></div>
-      <div class="detail-row"><span>Attendance</span><strong>Not marked</strong></div>
-      <div class="detail-row"><span>Certificates</span><strong>Pending</strong></div>
+function renderManageBody() {
+  const mine = events.filter(isOwnEvent);
+  if (!mine.length) return `<div class="soft-card empty-card"><p class="eyebrow">NOTHING TO MANAGE YET</p><h3>Events you create will appear here.</h3><button class="btn btn-dark" onclick="navigate('create')">Create an event ↗</button></div>`;
+  const regs = mine.flatMap(e => eventRegistry(e.id));
+  const capacity = mine.reduce((sum, e) => sum + e.seats, 0);
+  return `
+    <div class="dashboard-cards">
+      <div class="dashboard-card"><span>Total events</span><strong>${mine.length}</strong></div>
+      <div class="dashboard-card"><span>Registrations</span><strong>${regs.length}</strong></div>
+      <div class="dashboard-card"><span>Checked in</span><strong>${regs.filter(r => r.attended).length}</strong></div>
+      <div class="dashboard-card"><span>Fill rate</span><strong>${capacity ? Math.round((regs.length / capacity) * 100) : 0}%</strong></div>
     </div>
-    <button class="btn btn-dark" onclick="showToast('Attendance manager opened.');closeModal()">Manage attendance ↗</button>
-  `;
+    <div class="section-label">EVENT CONTROL CENTRE</div>
+    <div class="table-shell">
+      <table class="data-table">
+        <thead><tr><th>Event</th><th>Date</th><th>Registered</th><th>Checked in</th><th>Certificates</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${mine.map(event => { const r = eventRegistry(event.id); return `
+            <tr>
+              <td><strong>${escapeHtml(event.title)}</strong><br><span style="color:#999;font-size:9px">${escapeHtml(event.category)} · ${escapeHtml(event.venue)}</span></td>
+              <td>${escapeHtml(event.date)}</td>
+              <td>${r.length} / ${event.seats}</td>
+              <td>${r.filter(x => x.attended).length}</td>
+              <td>${r.filter(x => x.certificate).length}</td>
+              <td>
+                <button class="btn btn-outline" onclick="showParticipants(${event.id})">Participants</button>
+                <button class="btn btn-outline" onclick="showAttendance(${event.id})">Attendance</button>
+                <button class="btn btn-light" onclick="showCertificates(${event.id})">Certificates</button>
+              </td>
+            </tr>`; }).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
 
+function refreshManage() { const el = document.getElementById("manageBody"); if (el) el.innerHTML = renderManageBody(); }
+
+function manageGuard(id) {
+  const event = events.find(item => item.id === id);
+  return event && isOwnEvent(event) ? event : null;
+}
+
+function peopleRows(list, action) {
+  return list.length ? `<div class="people-list">${list.map(r => `
+    <div class="people-row"><div><strong>${escapeHtml(r.name)}</strong><small>${escapeHtml(r.email)}${r.teamName ? " · Team " + escapeHtml(r.teamName) : ""} · ${escapeHtml(r.passNo)}</small></div>${action(r)}</div>`).join("")}</div>`
+    : `<div class="soft-card empty-card"><p class="eyebrow">NO REGISTRATIONS YET</p><p>Participants will show up here as they register.</p></div>`;
+}
+
+function showParticipants(id) {
+  const event = manageGuard(id); if (!event) return;
+  const list = eventRegistry(id);
+  document.getElementById("modalContent").innerHTML = `
+    <p class="eyebrow">PARTICIPANTS · ${escapeHtml(event.category)}</p>
+    <h2>${escapeHtml(event.title)}</h2>
+    <p>${list.length} registered out of ${event.seats} places.</p>
+    ${peopleRows(list, r => `<span class="status">${r.attended ? "Checked in" : "Registered"}</span>`)}
+  `;
   document.getElementById("modal").classList.remove("hidden");
 }
+
+function showAttendance(id) {
+  const event = manageGuard(id); if (!event) return;
+  const list = eventRegistry(id), done = list.filter(r => r.attended).length;
+  document.getElementById("modalContent").innerHTML = `
+    <p class="eyebrow">ATTENDANCE · ${escapeHtml(event.category)}</p>
+    <h2>${escapeHtml(event.title)}</h2>
+    <p>${done} of ${list.length} checked in. You can also scan passes from the Scanner page.</p>
+    ${list.length ? `<div class="modal-actions-row"><button class="btn btn-dark" onclick="markAllAttendance(${id})">Mark everyone present</button><button class="btn btn-outline" onclick="closeModal();navigate('scanner')">Open scanner ↗</button></div>` : ""}
+    ${peopleRows(list, r => `<button class="btn ${r.attended ? "btn-light" : "btn-outline"}" onclick="toggleAttendance('${r.passNo}', ${id})">${r.attended ? "Present ✓ (undo)" : "Mark present"}</button>`)}
+  `;
+  document.getElementById("modal").classList.remove("hidden");
+}
+
+function toggleAttendance(passNo, id) {
+  const entry = readRegistry().find(r => r.passNo === passNo);
+  if (!entry || !manageGuard(entry.eventId)) return;
+  setAttendance(passNo, !entry.attended);
+  refreshManage(); showAttendance(id);
+}
+
+function markAllAttendance(id) {
+  if (!manageGuard(id)) return;
+  eventRegistry(id).filter(r => !r.attended).forEach(r => setAttendance(r.passNo, true));
+  refreshManage(); showAttendance(id); showToast("Everyone is marked present.");
+}
+
+function showCertificates(id) {
+  const event = manageGuard(id); if (!event) return;
+  const list = eventRegistry(id), ready = list.filter(r => r.attended && !r.certificate).length;
+  document.getElementById("modalContent").innerHTML = `
+    <p class="eyebrow">CERTIFICATES · ${escapeHtml(event.category)}</p>
+    <h2>${escapeHtml(event.title)}</h2>
+    <p>Certificates can be issued to participants who were checked in. ${list.filter(r => r.certificate).length} issued so far.</p>
+    <div class="modal-actions-row">
+      <select id="certType" class="cert-type"><option>Participation</option><option>Winner</option><option>Runner-up</option><option>Volunteer</option></select>
+      ${ready ? `<button class="btn btn-dark" onclick="issueAllCertificates(${id})">Issue to all checked-in (${ready})</button>` : ""}
+    </div>
+    ${peopleRows(list, r => r.certificate ? `<span class="status">${escapeHtml(r.certificate.type)} ✓</span>` : r.attended ? `<button class="btn btn-outline" onclick="issueOne('${r.passNo}', ${id})">Issue</button>` : `<span class="status muted">Not checked in</span>`)}
+  `;
+  document.getElementById("modal").classList.remove("hidden");
+}
+
+function issueOne(passNo, id) {
+  const entry = readRegistry().find(r => r.passNo === passNo);
+  if (!entry || !manageGuard(entry.eventId)) return;
+  issueCertificate(passNo, document.getElementById("certType")?.value || "Participation");
+  refreshManage(); showCertificates(id);
+}
+
+function issueAllCertificates(id) {
+  if (!manageGuard(id)) return;
+  const type = document.getElementById("certType")?.value || "Participation";
+  eventRegistry(id).filter(r => r.attended && !r.certificate).forEach(r => issueCertificate(r.passNo, type));
+  refreshManage(); showCertificates(id); showToast("Certificates issued.");
+}
+
 
 
 /* ---------- SIMPLE CARD + NAV MOTION ---------- */
@@ -2117,6 +2754,7 @@ function setupRadialNav() {
 /* ---------- UTILITY FUNCTIONS ---------- */
 
 function toggleProfileMenu() {
+  document.getElementById("notifPanel")?.classList.remove("show");
   document.getElementById("profileMenu").classList.toggle("show");
 }
 
@@ -2124,8 +2762,10 @@ function closeModal() {
   document.getElementById("modal").classList.add("hidden");
 }
 
-function logout() {
+async function logout() {
+  window.__campuslyLoggingOut = true;
   document.getElementById("profileMenu")?.classList.remove("show");
+  try { await CampuslyAuth.signOut(); } catch (e) {}
   localStorage.removeItem("campuslyRole");
   localStorage.removeItem("campuslyUser");
   window.location.href = "index.html";
@@ -2144,36 +2784,68 @@ function showToast(message) {
 
 /* ---------- INITIAL LOAD ---------- */
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   const page = document.body.dataset.page || "home";
-  const savedRole = localStorage.getItem("campuslyRole");
-  const portalPages = ["home", "events", "transport", "wallet", "gallery", "registrations", "create", "manage", "scanner", "profile"];
+  const portalPages = ["home", "events", "transport", "wallet", "gallery", "registrations", "certificates", "create", "manage", "scanner", "profile"];
+  const isAuthPage = page === "login" || page === "signup";
+  if (!isAuthPage && !portalPages.includes(page)) return;
 
-  if (page === "login") {
-    if (savedRole) {
-      window.location.href = "home.html";
-      return;
+  if (isAuthPage) {
+    const note = document.getElementById("authModeNote");
+    if (CampuslyAuth.mode === "local") {
+      document.querySelector(".signup-provider-row")?.classList.add("hidden");
+      if (note) note.textContent = "Local mode · accounts are stored only in this browser. Add your Firebase config to enable cloud accounts.";
+    } else if (note) {
+      note.textContent = "Passwords are handled securely by Firebase Authentication.";
     }
+  }
+
+  const session = await CampuslyAuth.ready;
+
+  if (isAuthPage) {
+    if (session) { window.location.href = "home.html"; return; }
+    if (page === "signup") {
+      const role = new URLSearchParams(window.location.search).get("role");
+      const roleSelect = document.getElementById("signupRole");
+      if (role && roleSelect && ["attendee", "organiser"].includes(role)) roleSelect.value = role;
+    }
+    hideLoading();
     return;
   }
 
-  if (page === "signup") {
-    const role = new URLSearchParams(window.location.search).get("role");
-    const roleSelect = document.getElementById("signupRole");
-    if (role && roleSelect && ["attendee", "organiser"].includes(role)) roleSelect.value = role;
+  if (!session) {
+    window.location.href = "index.html";
     return;
   }
 
-  if (portalPages.includes(page)) {
-    if (!savedRole) {
-      window.location.href = "index.html";
-      return;
-    }
+  currentRole = getMode(session);
+  const organiserPages = ["create", "manage", "scanner"], participantPages = ["wallet", "registrations", "certificates"];
+  if ((currentRole === "attendee" && organiserPages.includes(page)) || (currentRole === "organiser" && participantPages.includes(page))) {
+    window.location.replace("home.html");
+    return;
+  }
+  // Events published before ownership tracking belong to the first organizer account that opens the app.
+  if (session.role === "organiser") {
+    let claimed = false;
+    events.forEach(e => { if (!e.createdBy && e.organiser === "Campusly Organiser" && String(e.id).length >= 13) { e.createdBy = currentUid(); claimed = true; } });
+    if (claimed) saveData("campuslyEvents", events);
+  }
+  syncRecords();
+  updateUserInterface();
+  renderCurrentPage();
 
-    currentRole = savedRole;
-    updateUserInterface();
+  window.addEventListener("storage", e => {
+    if (!e.key) return;
+    if (e.key.startsWith("campuslyNotifications")) renderNotificationBadge();
+    if (!["campuslyRides", "campuslyBusBookings", "campuslyPassRegistry", "campuslyEvents"].includes(e.key)) return;
+    if (e.key === "campuslyEvents") events = normalizeEvents(loadData("campuslyEvents", defaultEvents));
+    if (!["transport", "manage", "wallet", "registrations"].includes(page)) return;
+    if (!document.getElementById("modal").classList.contains("hidden") || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || "")) return;
+    const y = window.scrollY;
+    syncRecords();
     renderCurrentPage();
-  }
+    window.scrollTo(0, y);
+  });
 });
 
 
