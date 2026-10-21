@@ -4,12 +4,50 @@
    into small, readable functions.
    ========================================================= */
 
+/* ---------- Event date helpers ---------- */
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function toISODate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function formatEventDate(d) {
+  return d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
+}
+// Accepts "YYYY-MM-DD" (date input) or "Mon DD, YYYY" (stored display format). Returns a local-midnight Date or null.
+function parseEventDate(value) {
+  if (!value) return null;
+  const iso = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = iso ? new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) : new Date(value);
+  if (isNaN(d.getTime())) return null;
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function isPastEventDate(value) {
+  const d = parseEventDate(value);
+  return !d || d < startOfToday();
+}
+// Attendance + certificates open on the event day and stay open afterwards.
+function eventHasStarted(event) {
+  const d = event && parseEventDate(event.date);
+  return !!d && d <= startOfToday();
+}
+function eventOpensOn(event) { return event ? event.date : ""; }
+// Demo events are always scheduled relative to today so they never go stale.
+function demoDate(daysFromToday) {
+  const d = startOfToday();
+  d.setDate(d.getDate() + daysFromToday);
+  return formatEventDate(d);
+}
+
 const defaultEvents = [
   {
     id: 1,
     title: "Hack the Campus",
     category: "Technical",
-    date: "Sep 04, 2026",
+    date: demoDate(5),
     time: "10:00 AM",
     venue: "Innovation Lab",
     seats: 120,
@@ -26,7 +64,7 @@ const defaultEvents = [
     id: 2,
     title: "Rang — Cultural Night",
     category: "Cultural",
-    date: "Sep 11, 2026",
+    date: demoDate(12),
     time: "06:30 PM",
     venue: "Open Air Theatre",
     seats: 800,
@@ -41,7 +79,7 @@ const defaultEvents = [
     id: 3,
     title: "Campus Cup",
     category: "Sports",
-    date: "Sep 17, 2026",
+    date: demoDate(18),
     time: "04:00 PM",
     venue: "Main Sports Ground",
     seats: 300,
@@ -58,7 +96,7 @@ const defaultEvents = [
     id: 4,
     title: "Future of AI",
     category: "Academic",
-    date: "Sep 22, 2026",
+    date: demoDate(23),
     time: "11:00 AM",
     venue: "Auditorium 01",
     seats: 450,
@@ -73,7 +111,7 @@ const defaultEvents = [
     id: 5,
     title: "Frame by Frame",
     category: "Art",
-    date: "Sep 26, 2026",
+    date: demoDate(27),
     time: "02:00 PM",
     venue: "Design Studio",
     seats: 90,
@@ -88,7 +126,7 @@ const defaultEvents = [
     id: 6,
     title: "Unplugged Sessions",
     category: "Music",
-    date: "Oct 02, 2026",
+    date: demoDate(33),
     time: "07:00 PM",
     venue: "Student Plaza",
     seats: 500,
@@ -100,6 +138,48 @@ const defaultEvents = [
     image: "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=1000&q=80"
   }
 ];
+
+/* ---------- Registration form fields (organiser-defined) ---------- */
+const FIELD_TYPES = { text: "Short text", email: "Email", tel: "Phone number", number: "Number", textarea: "Long text", select: "Dropdown" };
+const LOCKED_FIELD_IDS = ["name", "email"];   // every participant / team member is identified by these two
+const MAX_FORM_FIELDS = 20;
+
+function defaultFormFields(mode) {
+  const fields = [
+    { id: "name", label: "Full name", type: "text", required: true, locked: true },
+    { id: "email", label: "Email", type: "email", required: true, locked: true }
+  ];
+  if (mode !== "team") fields.push({ id: "college", label: "College / Department", type: "text", required: true });
+  fields.push({ id: "phone", label: "Phone number", type: "tel", required: true });
+  return fields;
+}
+
+// Accepts whatever is stored (or nothing) and always returns a safe, ordered list with Name + Email first.
+function sanitizeFields(list, mode) {
+  if (!Array.isArray(list) || !list.length) return defaultFormFields(mode);
+  const seen = new Set(), out = [];
+  list.forEach(raw => {
+    if (!raw || typeof raw !== "object") return;
+    const label = String(raw.label || "").trim().slice(0, 60);
+    let id = String(raw.id || "").replace(/[^a-zA-Z0-9_]/g, "").slice(0, 24);
+    if (!label || !id || seen.has(id) || out.length >= MAX_FORM_FIELDS) return;
+    const type = FIELD_TYPES[raw.type] ? raw.type : "text";
+    const field = { id, label, type, required: !!raw.required };
+    if (type === "select") {
+      const options = (Array.isArray(raw.options) ? raw.options : String(raw.options || "").split(","))
+        .map(o => String(o).trim()).filter(Boolean).filter((o, i, a) => a.indexOf(o) === i).slice(0, 30);
+      if (options.length < 2) field.type = "text"; else field.options = options;
+    }
+    seen.add(id); out.push(field);
+  });
+  const base = defaultFormFields(mode);
+  LOCKED_FIELD_IDS.slice().reverse().forEach(id => {
+    const i = out.findIndex(f => f.id === id), def = base.find(f => f.id === id);
+    const field = i >= 0 ? out.splice(i, 1)[0] : { ...def };
+    out.unshift({ ...field, label: def.label, type: def.type, required: true, locked: true });
+  });
+  return out;
+}
 
 let events = normalizeEvents(loadData("campuslyEvents", defaultEvents));
 let registrations = loadData("campuslyRegistrations", []);
@@ -168,7 +248,7 @@ function addRegistryEntry(event, data) {
   const base = `CP-${String(event.id).padStart(2, "0")}-${String(getUserId()).slice(-3)}`;
   let passNo = base, n = 1;
   while (list.some(r => r.passNo === passNo)) passNo = `${base}-${++n}`;
-  list.push({ passNo, eventId: event.id, uid, userId: getUserId(), name: data.name, email: data.email, college: data.college, mode: data.mode, teamName: data.teamName || "", registeredAt: new Date().toISOString(), attended: false, attendedAt: null, certificate: null });
+  list.push({ passNo, eventId: event.id, uid, userId: getUserId(), name: data.name, email: data.email, college: data.college, mode: data.mode, teamName: data.teamName || "", teamSize: data.teamSize || 0, answers: data.answers || null, memberList: data.memberList || null, registeredAt: new Date().toISOString(), attended: false, attendedAt: null, certificate: null });
   writeRegistry(list);
 }
 function removeRegistryEntry(eventId) { writeRegistry(readRegistry().filter(r => !(r.uid === currentUid() && r.eventId === eventId))); }
@@ -189,6 +269,8 @@ function syncRecords() {
 function setAttendance(passNo, present) {
   const list = readRegistry(), entry = list.find(r => r.passNo === passNo);
   if (!entry) return null;
+  const evGate = events.find(e => e.id === entry.eventId);
+  if (present && !eventHasStarted(evGate)) return null;
   entry.attended = present;
   entry.attendedAt = present ? new Date().toISOString() : null;
   writeRegistry(list);
@@ -199,6 +281,7 @@ function setAttendance(passNo, present) {
 function issueCertificate(passNo, type) {
   const list = readRegistry(), entry = list.find(r => r.passNo === passNo);
   if (!entry || !entry.attended) return false;
+  if (!eventHasStarted(events.find(e => e.id === entry.eventId))) return false;
   entry.certificate = { type, date: new Date().toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }) };
   writeRegistry(list);
   const ev = events.find(e => e.id === entry.eventId);
@@ -319,7 +402,9 @@ function normalizeEvents(list) {
   const cleaned = (Array.isArray(list) ? list : defaultEvents).map(item => {
     const base = defaultEvents.find(def => def.id === item.id) || {};
     const mode = item.registrationMode || base.registrationMode || "individual";
-    const event = { ...item, registrationMode: mode };
+    const event = { ...item, registrationMode: mode, formFields: sanitizeFields(item.formFields, mode) };
+    // Demo events saved in an earlier session may now be in the past; move them back to upcoming dates.
+    if (base.date && isPastEventDate(item.date)) event.date = base.date;
     if (mode === "team") {
       let min = parseInt(item.teamMin ?? base.teamMin, 10);
       let max = parseInt(item.teamMax ?? base.teamMax, 10);
@@ -333,6 +418,20 @@ function normalizeEvents(list) {
   });
   try { localStorage.setItem("campuslyEvents", JSON.stringify(cleaned)); } catch (e) {}
   return cleaned;
+}
+
+// Data is first read when script.js loads, before the signed-in user's cloud data has arrived.
+// Once sign-in (and the cloud sync) has finished, read everything again for the right user.
+function reloadAppData() {
+  events = normalizeEvents(loadData("campuslyEvents", defaultEvents));
+  registrations = loadData("campuslyRegistrations", []);
+  registrationDetails = loadData("campuslyRegistrationDetails", {});
+  certificates = loadData("campuslyCertificates", []);
+  attendanceStats = loadData("campuslyAttendanceStats", { attended: 0, streak: 0 });
+  attendanceRecords = loadData("campuslyAttendanceRecords", []);
+  galleryItems = loadData("campuslyGalleryItems", galleryItems);
+  selectedGalleryEventId = Number(localStorage.getItem("campuslyGalleryEventId") || 0) || null;
+  if (selectedGalleryEventId && !events.some(event => event.id === selectedGalleryEventId)) selectedGalleryEventId = null;
 }
 
 function scopedKey(key) {
@@ -409,9 +508,7 @@ function goToPortal() {
 async function googleAuth() {
   setAuthMessage("");
   try {
-    const role = document.getElementById("signupRole")?.value;
-    const college = document.getElementById("signupCollege")?.value.trim();
-    await CampuslyAuth.signInWithGoogle({ role, college });
+    await CampuslyAuth.signInWithGoogle();
     goToPortal();
   } catch (err) { setAuthMessage(err.message || "Google sign-in failed."); }
 }
@@ -445,6 +542,9 @@ async function signupUser(event) {
       name: document.getElementById("signupName").value,
       email: document.getElementById("signupEmail").value,
       college: document.getElementById("signupCollege").value,
+      rollNo: document.getElementById("signupRollNo").value,
+      degree: document.getElementById("signupDegree").value,
+      year: document.getElementById("signupYear").value,
       role: document.getElementById("signupRole").value,
       password
     });
@@ -463,13 +563,27 @@ async function forgotPassword() {
   } catch (err) { setAuthMessage(err.message || "Couldn't send the reset email."); }
 }
 
+function displayName() {
+  const u = currentUser();
+  return (u.name || "").trim() || (u.email || "").split("@")[0] || "Guest";
+}
+
+function applyRoleToNavbar() {
+  // Visibility is driven by a body class + CSS (!important), so it can never be out of sync with the mode.
+  document.body.classList.toggle("role-organiser", currentRole === "organiser");
+  document.body.classList.toggle("role-attendee", currentRole !== "organiser");
+  document.querySelectorAll(".attendee-only, .organiser-only").forEach(item => { item.style.display = ""; });
+}
+
 function updateUserInterface() {
-  document.querySelectorAll(".attendee-only").forEach(item => { item.style.display = currentRole === "attendee" ? "" : "none"; });
-  document.querySelectorAll(".organiser-only").forEach(item => { item.style.display = currentRole === "organiser" ? "" : "none"; });
-  const name = currentUser().name || (currentRole === "organiser" ? "Maya" : "Aarav");
-  document.getElementById("profileName").textContent = name;
-  document.getElementById("profileRole").textContent = roleLabel().toUpperCase();
-  document.getElementById("profileAvatar").textContent = name.charAt(0);
+  applyRoleToNavbar();
+  const name = displayName();
+  const nameEl = document.getElementById("profileName");
+  const roleEl = document.getElementById("profileRole");
+  const avatarEl = document.getElementById("profileAvatar");
+  if (nameEl) nameEl.textContent = name;
+  if (roleEl) roleEl.textContent = roleLabel().toUpperCase();
+  if (avatarEl) avatarEl.textContent = name.charAt(0).toUpperCase();
   const menu = document.getElementById("profileMenu");
   if (menu && !document.getElementById("modeSwitchBtn")) {
     const btn = document.createElement("button");
@@ -546,6 +660,7 @@ function renderCurrentPage() {
   setupEventCardMotion();
   setupWalletInteraction();
   if (page === "scanner") setupScanner();
+  if (page === "create") startFormBuilder(null, "individual");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -792,7 +907,7 @@ function renderEventsPageCarousel() {
                     <span>${event.date} · ${event.time}</span>
                     <h3>${event.title}</h3>
                     <p>⌖ ${event.venue}</p>
-                    <button class="btn btn-lime" type="button" onclick="showEvent(${event.id})">View Details →</button>
+                    <button class="btn btn-lime" type="button" onclick="showEvent(${event.id})">${currentRole === "attendee" ? "View Details and Register →" : "View Details →"}</button>
                     ${registered ? '<small class="events-page-registered">Registered ✓</small>' : ''}
                   </div>
                 </div>
@@ -984,6 +1099,32 @@ function showEvent(id) {
   document.getElementById("modal").classList.remove("hidden");
 }
 
+// One input for one organiser-defined field. `m` is the member number (1 for individual registrations).
+function regFieldHtml(f, m, value) {
+  const attrs = `data-m="${m}" data-fid="${escapeHtml(f.id)}" ${f.required ? "required" : ""}`;
+  const v = escapeHtml(value || "");
+  let control;
+  if (f.type === "textarea") control = `<textarea ${attrs}>${v}</textarea>`;
+  else if (f.type === "select") control = `<select ${attrs}><option value="">Select…</option>${(f.options || []).map(o => `<option value="${escapeHtml(o)}" ${o === value ? "selected" : ""}>${escapeHtml(o)}</option>`).join("")}</select>`;
+  else if (f.type === "tel") control = `<input ${attrs} type="tel" inputmode="tel" value="${v}">`;
+  else if (f.type === "number") control = `<input ${attrs} type="number" value="${v}">`;
+  else if (f.type === "email") control = `<input ${attrs} type="email" value="${v}">`;
+  else control = `<input ${attrs} value="${v}">`;
+  return `<label class="form-field ${f.type === "textarea" ? "full" : ""}"><span>${escapeHtml(f.label)}${f.required ? "" : " (optional)"}</span>${control}</label>`;
+}
+
+function savedAnswer(saved, m, f) {
+  const list = m === 1 && !(saved.memberList && saved.memberList.length) ? saved.answers : (saved.memberList || [])[m - 1]?.answers;
+  const hit = (list || []).find(a => a.id === f.id);
+  if (hit) return hit.value;
+  if (m === 1) {   // first person is the signed-in user: pre-fill what the account already knows
+    if (f.id === "name") return getUserName();
+    if (f.id === "email") return getUserEmail();
+    if (f.id === "college") return getUserCollege();
+  }
+  return "";
+}
+
 function openRegistrationForm(id) {
   const event = events.find(item => item.id === id);
   if (!event || registrations.includes(id)) return;
@@ -993,27 +1134,31 @@ function openRegistrationForm(id) {
   const teamMin = event.teamMin || 2;
   const teamMax = event.teamMax || 4;
   const saved = registrationDetails[id] || {};
-  const leadLine = `${saved.name || getUserName()}${(saved.email || getUserEmail()) ? ", " + (saved.email || getUserEmail()) : ""}`.trim();
+  const fields = sanitizeFields(event.formFields, mode);
+  const startSize = Math.min(teamMax, Math.max(teamMin, Number(saved.teamSize) || teamMin));
+
+  const memberCard = i => `
+    <fieldset class="member-card ${i > startSize ? "hidden" : ""}" data-member-card="${i}" ${i > startSize ? "disabled" : ""}>
+      <legend>Member ${i}${i === 1 ? " · you (team lead)" : ""}</legend>
+      <div class="member-fields">${fields.map(f => regFieldHtml(f, i, savedAnswer(saved, i, f))).join("")}</div>
+    </fieldset>`;
 
   document.getElementById("modalContent").innerHTML = `
-    <p class="eyebrow">REGISTRATION · ${event.category}</p>
-    <h2>Join ${event.title}.</h2>
-    <p>Fill in your details below. Your pass will be generated in your Wallet once the registration is submitted.</p>
+    <p class="eyebrow">REGISTRATION · ${escapeHtml(event.category)}</p>
+    <h2>Join ${escapeHtml(event.title)}.</h2>
+    <p>Fill in the details below. Your pass will be generated in your Wallet once the registration is submitted.</p>
     <form class="registration-form" onsubmit="submitRegistration(event, ${id})">
       <div class="registration-mode-row">
         <button type="button" class="mode-chip ${mode === "individual" ? "active" : ""}" disabled>Individual</button>
         <button type="button" class="mode-chip ${mode === "team" ? "active" : ""}" disabled>Team</button>
       </div>
-      <label class="form-field"><span>Full name</span><input id="regName" required value="${saved.name || getUserName()}" placeholder="Your full name"></label>
-      <label class="form-field"><span>Email</span><input id="regEmail" type="email" required value="${saved.email || getUserEmail()}" placeholder="you@college.edu"></label>
-      <label class="form-field"><span>College / Department</span><input id="regCollege" required value="${saved.college || getUserCollege()}" placeholder="Your college / department"></label>
       ${mode === "team" ? `
-        <div class="team-config-note"><strong>Team size: ${teamMin}-${teamMax}</strong><span>The organiser has set this event up for team registration.</span></div>
-        <label class="form-field"><span>Team name</span><input id="regTeamName" required value="${saved.teamName || ""}" placeholder="e.g. Byte Force"></label>
-        <label class="form-field"><span>Team size</span><input id="regTeamSize" type="number" min="${teamMin}" max="${teamMax}" required value="${saved.teamSize || teamMin}" placeholder="${teamMin}-${teamMax}"></label>
-        <label class="form-field full"><span>Team members (include yourself)</span><textarea id="regMembers" required placeholder="One member per line: Name, email@college.edu">${saved.members || leadLine}</textarea></label>
+        <div class="team-config-note"><strong>Team size: ${teamMin}-${teamMax}</strong><span>Fill in the details for every member of your team.</span></div>
+        <label class="form-field"><span>Team name</span><input id="regTeamName" required value="${escapeHtml(saved.teamName || "")}" placeholder="e.g. Byte Force"></label>
+        <label class="form-field"><span>Team size</span><select id="regTeamSize" onchange="updateTeamSize(${teamMax})">${Array.from({ length: teamMax - teamMin + 1 }, (_, k) => teamMin + k).map(n => `<option value="${n}" ${n === startSize ? "selected" : ""}>${n} member${n === 1 ? "" : "s"}</option>`).join("")}</select></label>
+        <div class="member-stack">${Array.from({ length: teamMax }, (_, k) => memberCard(k + 1)).join("")}</div>
       ` : `
-        <label class="form-field full"><span>Phone number</span><input id="regPhone" required value="${saved.phone || ""}" placeholder="10 digit mobile number"></label>
+        <div class="member-fields member-fields-solo">${fields.map(f => regFieldHtml(f, 1, savedAnswer(saved, 1, f))).join("")}</div>
       `}
       <div class="registration-actions"><button type="submit" class="btn btn-dark">Submit registration ↗</button><button type="button" class="btn btn-light" onclick="showEvent(${id})">Back</button></div>
     </form>
@@ -1021,9 +1166,40 @@ function openRegistrationForm(id) {
   document.getElementById("modal").classList.remove("hidden");
 }
 
+// Show exactly as many member cards as the chosen team size; hidden cards are disabled so they are never validated.
+function updateTeamSize(max) {
+  const size = Number(document.getElementById("regTeamSize")?.value || 0);
+  for (let i = 1; i <= max; i++) {
+    const card = document.querySelector(`[data-member-card="${i}"]`);
+    if (!card) continue;
+    card.classList.toggle("hidden", i > size);
+    card.disabled = i > size;
+  }
+}
+
 function getUserName() { return JSON.parse(localStorage.getItem("campuslyUser") || "null")?.name || ""; }
 function getUserEmail() { return JSON.parse(localStorage.getItem("campuslyUser") || "null")?.email || ""; }
 function getUserCollege() { return JSON.parse(localStorage.getItem("campuslyUser") || "null")?.college || ""; }
+
+// Reads one person's answers from the form and validates them against the organiser's field definitions.
+function collectMember(form, m, fields) {
+  const who = m > 1 ? `Member ${m}: ` : "";
+  const answers = [];
+  for (const f of fields) {
+    const el = form.querySelector(`[data-m="${m}"][data-fid="${f.id}"]`);
+    const value = (el ? el.value : "").trim();
+    if (f.required && !value) return { error: `${who}${f.label} is required.` };
+    if (value) {
+      if (f.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return { error: `${who}enter a valid email for "${f.label}".` };
+      if (f.type === "tel" && !/^[0-9+\-\s()]{7,15}$/.test(value)) return { error: `${who}enter a valid phone number for "${f.label}".` };
+      if (f.type === "number" && !Number.isFinite(Number(value))) return { error: `${who}"${f.label}" must be a number.` };
+      if (f.type === "select" && !(f.options || []).includes(value)) return { error: `${who}choose an option for "${f.label}".` };
+    }
+    answers.push({ id: f.id, label: f.label, value: f.type === "textarea" ? value.slice(0, 1000) : value.slice(0, 200) });
+  }
+  const pick = key => (answers.find(a => a.id === key) || {}).value || "";
+  return { member: { name: pick("name"), email: pick("email").toLowerCase(), answers } };
+}
 
 function submitRegistration(formEvent, id) {
   formEvent.preventDefault();
@@ -1032,39 +1208,41 @@ function submitRegistration(formEvent, id) {
   if (isOwnEvent(event)) { showToast("You created this event, so you can't register for it."); return; }
   if (event.registered >= event.seats) { showToast("This event is currently full."); return; }
 
+  const form = formEvent.target;
   const mode = event.registrationMode || "individual";
-  const data = {
-    name: document.getElementById("regName").value.trim(),
-    email: document.getElementById("regEmail").value.trim(),
-    college: document.getElementById("regCollege").value.trim(),
-    mode,
-    phone: document.getElementById("regPhone")?.value.trim() || "",
-    teamName: document.getElementById("regTeamName")?.value.trim() || "",
-    teamSize: Number(document.getElementById("regTeamSize")?.value || 0),
-    members: document.getElementById("regMembers")?.value.trim() || ""
-  };
+  const fields = sanitizeFields(event.formFields, mode);
+  const answerOf = (member, key) => (member.answers.find(a => a.id === key) || {}).value || "";
+  let data;
 
   if (mode === "team") {
     const min = event.teamMin || 2, max = event.teamMax || 4;
-    if (!Number.isInteger(data.teamSize) || data.teamSize < min || data.teamSize > max) { showToast(`Team size must be between ${min} and ${max} members.`); return; }
-    if (!data.teamName || !data.members) { showToast("Please enter a team name and list your team members."); return; }
+    const teamSize = Number(document.getElementById("regTeamSize")?.value || 0);
+    const teamName = document.getElementById("regTeamName")?.value.trim() || "";
+    if (!Number.isInteger(teamSize) || teamSize < min || teamSize > max) { showToast(`Team size must be between ${min} and ${max} members.`); return; }
+    if (!teamName) { showToast("Please enter a team name."); return; }
 
-    const lines = data.members.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-    const emailPattern = /[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+/;
-    const seen = new Set();
-    const memberList = [];
-    for (const line of lines) {
-      const found = line.match(emailPattern);
-      if (!found) { showToast(`Add an email for each member. Missing on: "${line}"`); return; }
-      const email = found[0].toLowerCase();
-      if (seen.has(email)) { showToast(`${email} is listed more than once.`); return; }
-      seen.add(email);
-      const name = line.replace(found[0], "").replace(/[,;|\-–—]+\s*$/, "").replace(/^\s*[,;|\-–—]+/, "").trim();
-      if (!name) { showToast(`Add a name for ${email}.`); return; }
-      memberList.push({ name, email });
+    const memberList = [], seen = new Set();
+    for (let m = 1; m <= teamSize; m++) {
+      const res = collectMember(form, m, fields);
+      if (res.error) { showToast(res.error); return; }
+      if (seen.has(res.member.email)) { showToast(`${res.member.email} is listed more than once.`); return; }
+      seen.add(res.member.email);
+      memberList.push(res.member);
     }
-    if (memberList.length !== data.teamSize) { showToast(`Team size is ${data.teamSize} but you listed ${memberList.length} member${memberList.length === 1 ? "" : "s"}.`); return; }
-    data.memberList = memberList;
+    const lead = memberList[0];
+    data = {
+      name: lead.name, email: lead.email, college: answerOf(lead, "college") || getUserCollege(),
+      mode, phone: answerOf(lead, "phone"), teamName, teamSize,
+      members: memberList.map(x => `${x.name}, ${x.email}`).join("\n"),
+      memberList, answers: lead.answers
+    };
+  } else {
+    const res = collectMember(form, 1, fields);
+    if (res.error) { showToast(res.error); return; }
+    data = {
+      name: res.member.name, email: res.member.email, college: answerOf(res.member, "college") || getUserCollege(),
+      mode, phone: answerOf(res.member, "phone"), teamName: "", teamSize: 0, members: "", answers: res.member.answers
+    };
   }
 
   registrationDetails[id] = data;
@@ -1629,7 +1807,7 @@ function showPass(id) {
   const event = events.find(item => item.id === Number(id));
   if (!event) return;
   const details = registrationDetails[event.id] || {};
-  const userName = getUserName() || "Aarav Sharma";
+  const userName = getUserName() || displayName();
   const userId = getUserId();
   const isTeam = details.mode === "team";
   const passNo = passNoFor(event.id);
@@ -1648,11 +1826,25 @@ function showPass(id) {
 }
 
 
+const LEVELS = [
+  { slug: "bronze", name: "Bronze Explorer", short: "Bronze", min: 0,  icon: "◆", description: "Your campus journey starts here" },
+  { slug: "silver", name: "Silver Explorer", short: "Silver", min: 5,  icon: "★", description: "5+ events attended" },
+  { slug: "gold",   name: "Gold Explorer",   short: "Gold",   min: 10, icon: "✦", description: "10+ events attended" },
+  { slug: "legend", name: "Campus Legend",   short: "Legend", min: 20, icon: "♛", description: "Top-tier campus explorer" }
+];
+
+function levelInfo(attended) {
+  const n = Math.max(0, Number(attended) || 0);
+  let idx = 0;
+  LEVELS.forEach((lvl, i) => { if (n >= lvl.min) idx = i; });
+  const current = LEVELS[idx], next = LEVELS[idx + 1] || null;
+  const percent = next ? Math.round(((n - current.min) / (next.min - current.min)) * 100) : 100;
+  return { idx, current, next, percent, remaining: next ? next.min - n : 0 };
+}
+
 function getEventLevel(attended) {
-  if (attended >= 20) return { name: "Campus Legend", slug: "legend", description: "Top-tier campus explorer", next: "You are at the top level" };
-  if (attended >= 10) return { name: "Gold Explorer", slug: "gold", description: "10+ events completed", next: "8 more for Campus Legend" };
-  if (attended >= 5) return { name: "Silver Explorer", slug: "silver", description: "5+ events completed", next: `${10 - attended} more for Gold Explorer` };
-  return { name: "Bronze Explorer", slug: "bronze", description: "Your campus journey starts here", next: `${5 - attended} more for Silver Explorer` };
+  const { current, next, remaining } = levelInfo(attended);
+  return { name: current.name, slug: current.slug, description: current.description, next: next ? `${remaining} more for ${next.name}` : "You are at the top level" };
 }
 
 function renderGallery() {
@@ -2020,6 +2212,7 @@ function processScan(raw) {
   const event = entry && events.find(e => e.id === entry.eventId);
   if (!entry || !event) scannerResult = { valid: false, message: "No registration matches this pass ID." };
   else if (!canScan(event)) scannerResult = { valid: false, message: `This pass is for "${event.title}", which another organizer created.` };
+  else if (!eventHasStarted(event)) scannerResult = { valid: false, message: `Attendance for "${event.title}" opens on ${event.date}.` };
   else {
     const already = entry.attended;
     if (!already) setAttendance(entry.passNo, true);
@@ -2033,12 +2226,82 @@ function processScan(raw) {
 
 
 
+function buildAchievements(org, d) {
+  const badge = (icon, title, desc, value, goal) => ({ icon, title, desc, value: Math.min(value, goal), goal, unlocked: value >= goal });
+  if (org) return [
+    badge("＋", "First Event", "Create your first event", d.created, 1),
+    badge("▦", "Event Host", "Create 3 events", d.created, 3),
+    badge("◒", "Crowd Puller", "Get 10 registrations across your events", d.regs, 10),
+    badge("⌁", "Door Keeper", "Check in 5 attendees", d.checkedIn, 5),
+    badge("✦", "Recognition", "Issue your first certificate", d.certsIssued, 1),
+    badge("▧", "Storyteller", "Add 3 photos to your event galleries", d.photos, 3)
+  ];
+  return [
+    badge("◒", "First Step", "Register for your first event", d.registered, 1),
+    badge("✓", "Checked In", "Get checked in at an event", d.attended, 1),
+    badge("⚑", "Regular", "Attend 3 events", d.attended, 3),
+    badge("☷", "Team Player", "Register for a team event", d.teamRegs, 1),
+    badge("◎", "All-Rounder", "Register in 3 different categories", d.categories, 3),
+    badge("✦", "Certified", "Earn your first certificate", d.certs, 1),
+    badge("▧", "Memory Maker", "Have 3 gallery photos from your events", d.photos, 3),
+    badge("♛", "Campus Legend", "Attend 20 events", d.attended, 20)
+  ];
+}
+
+function renderAchievements(org, d) {
+  const badges = buildAchievements(org, d);
+  const unlocked = badges.filter(b => b.unlocked).length;
+  let hero;
+  if (org) {
+    hero = `
+      <div class="ach-level">
+        <div class="ach-medal legend">♛</div>
+        <div><p class="eyebrow">ORGANIZER ACHIEVEMENTS</p><h3>${unlocked} of ${badges.length} unlocked</h3>
+        <p>Milestones for the events you host, the people you check in and the certificates you issue.</p></div>
+      </div>
+      <div>
+        <div class="ach-progress-label"><span>Overall progress</span><strong>${Math.round(unlocked / badges.length * 100)}%</strong></div>
+        <div class="ach-bar"><i style="width:${Math.round(unlocked / badges.length * 100)}%"></i></div>
+      </div>`;
+  } else {
+    const info = levelInfo(d.attended);
+    hero = `
+      <div class="ach-level">
+        <div class="ach-medal ${info.current.slug}">${info.current.icon}</div>
+        <div><p class="eyebrow">CURRENT LEVEL</p><h3>${info.current.name}</h3>
+        <p>${d.attended} event${d.attended === 1 ? "" : "s"} attended. Levels are earned by getting checked in at events, not just registering.</p></div>
+      </div>
+      <div>
+        <div class="ach-progress-label"><span>${info.next ? `Next: <strong>${info.next.name}</strong>` : "<strong>Top level reached 🎉</strong>"}</span><span>${info.next ? `${info.remaining} more event${info.remaining === 1 ? "" : "s"}` : ""}</span></div>
+        <div class="ach-bar" role="progressbar" aria-valuenow="${info.percent}" aria-valuemin="0" aria-valuemax="100"><i style="width:${info.percent}%"></i></div>
+        <div class="ach-steps">
+          ${LEVELS.map((l, i) => `<div class="ach-step ${i <= info.idx ? "done" : ""} ${i === info.idx ? "current" : ""}"><b>${l.short}</b>${l.min}+ events</div>`).join("")}
+        </div>
+      </div>`;
+  }
+  return `<article class="soft-card ach-card">
+    <div class="ach-top">${hero}</div>
+    <div class="ach-badges-head"><h4>Badges</h4><span>${unlocked} / ${badges.length} unlocked</span></div>
+    <div class="ach-badges">
+      ${badges.map(b => `
+        <div class="ach-badge ${b.unlocked ? "unlocked" : "locked"}">
+          <div class="ach-badge-icon">${b.unlocked ? b.icon : "🔒"}</div>
+          <div><strong>${b.title}</strong><small>${b.desc}</small>
+          ${b.unlocked ? "" : `<div class="ach-mini"><i style="width:${Math.round(b.value / b.goal * 100)}%"></i></div><small>${b.value} / ${b.goal}</small>`}</div>
+        </div>`).join("")}
+    </div>
+  </article>`;
+}
+
 function renderProfile() {
   const user = JSON.parse(localStorage.getItem("campuslyUser") || "null") || {};
   const profile = {
     name: user.name || (currentRole === "organiser" ? "Campusly Organizer" : "Campusly Attendee"),
     email: user.email || "demo@campusly.app",
     college: user.college || "Campusly Demo College",
+    rollNo: user.rollNo || "—",
+    degree: user.degree || "—",
+    year: yearLabel(user.year),
     id: user.id || `CLY-2026-${String(Math.floor(100 + Math.random() * 900))}`,
     joined: user.joined || "Aug 2026"
   };
@@ -2054,8 +2317,20 @@ function renderProfile() {
   const activePasses = events.filter(event => registrations.includes(event.id));
   const attendance = Math.max(0, Number(attendanceStats.attended || 0));
   const streak = Math.max(0, Number(attendanceStats.streak || 0));
-  const level = attendance >= 25 ? "Campus Legend" : attendance >= 15 ? "Gold Explorer" : attendance >= 8 ? "Silver Explorer" : "Bronze Explorer";
-  const levelNext = attendance >= 25 ? "Max level reached" : attendance >= 15 ? `${25 - attendance} more attended events to Campus Legend` : attendance >= 8 ? `${15 - attendance} more attended events to Gold Explorer` : `${8 - attendance} more attended events to Silver Explorer`;
+  const level = levelInfo(attendance).current.name;
+  const myPhotos = galleryItems.filter(i => galleryEvents().some(e => e.id === Number(i.eventId))).length;
+  const achievementData = {
+    attended: attendance,
+    registered: registrations.length,
+    teamRegs: registrations.filter(id => (registrationDetails[id] || {}).mode === "team").length,
+    categories: new Set(events.filter(e => registrations.includes(e.id)).map(e => e.category)).size,
+    certs: certificates.length,
+    photos: myPhotos,
+    created: mine.length,
+    regs: regsIn.length,
+    checkedIn: regsIn.filter(r => r.attended).length,
+    certsIssued: regsIn.filter(r => r.certificate).length
+  };
   const recent = org ? mine.slice(0, 4).map(event => ({ label: "Event created", title: event.title, meta: `${event.date} · ${eventRegistry(event.id).length} registered` })) : [
     ...activePasses.slice(0, 2).map(event => ({ label: "Event pass active", title: event.title, meta: `${event.date} · ${event.venue}` })),
     ...certificates.slice(0, 2).map(certificate => ({ label: "Certificate added", title: certificate.event, meta: `${certificate.type} · ${certificate.date}` }))
@@ -2086,6 +2361,9 @@ function renderProfile() {
             <div><span>EMAIL</span><strong>${escapeHtml(profile.email)}</strong></div>
             <div><span>CAMPUSLY ID</span><strong>${escapeHtml(profile.id)}</strong></div>
             <div><span>COLLEGE</span><strong>${escapeHtml(profile.college)}</strong></div>
+            <div><span>ROLL NO</span><strong>${escapeHtml(profile.rollNo)}</strong></div>
+            <div><span>DEGREE</span><strong>${escapeHtml(profile.degree)}</strong></div>
+            <div><span>YEAR</span><strong>${escapeHtml(profile.year)}</strong></div>
             <div><span>MEMBER SINCE</span><strong>${escapeHtml(profile.joined)}</strong></div>
           </div>
           <div class="profile-actions">
@@ -2117,17 +2395,7 @@ function renderProfile() {
       </div>
 
       <div class="profile-section-grid">
-        ${org ? "" : `<article class="soft-card profile-achievement-card">
-          <div class="profile-section-heading"><div><p class="eyebrow">ACHIEVEMENT</p><h3>${level}</h3></div><div class="profile-achievement-icon">✦</div></div>
-          <p>Attendance-based campus level earned from your participation history.</p>
-          <div class="profile-level-track">
-            <div class="profile-level-step ${attendance >= 0 ? 'done' : ''}"><span>Bronze</span></div>
-            <div class="profile-level-step ${attendance >= 8 ? 'done' : ''}"><span>Silver</span></div>
-            <div class="profile-level-step ${attendance >= 15 ? 'done' : ''}"><span>Gold</span></div>
-            <div class="profile-level-step ${attendance >= 25 ? 'done' : ''}"><span>Legend</span></div>
-          </div>
-          <small>${levelNext}</small>
-        </article>`}
+        ${renderAchievements(org, achievementData)}
 
         <article class="soft-card profile-activity-card">
           <div class="profile-section-heading"><div><p class="eyebrow">${org ? "YOUR EVENTS" : "RECENT ACTIVITY"}</p><h3>${org ? "Recently created" : "Your campus trail"}</h3></div></div>
@@ -2162,12 +2430,22 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[char]));
 }
 
+function yearLabel(y) {
+  const n = parseInt(y, 10);
+  if (!n) return "—";
+  const suffix = n === 1 ? "st" : n === 2 ? "nd" : n === 3 ? "rd" : "th";
+  return `${n}${suffix} year`;
+}
+
 function openEditProfile() {
   const user = JSON.parse(localStorage.getItem("campuslyUser") || "null") || {};
   const current = {
     name: user.name || (currentRole === "organiser" ? "Campusly Organizer" : "Campusly Attendee"),
     email: user.email || "demo@campusly.app",
     college: user.college || "Campusly Demo College",
+    rollNo: user.rollNo || "",
+    degree: user.degree || "",
+    year: String(user.year || "")
   };
   document.getElementById("modalContent").innerHTML = `
     <p class="eyebrow">PROFILE SETTINGS</p>
@@ -2177,6 +2455,9 @@ function openEditProfile() {
         <label><span>Full name</span><input id="profileEditName" value="${escapeHtml(current.name)}" required></label>
         <label><span>Email</span><input id="profileEditEmail" type="email" value="${escapeHtml(current.email)}" readonly title="Your sign-in email can't be changed here"></label>
         <label><span>College</span><input id="profileEditCollege" value="${escapeHtml(current.college)}" required></label>
+        <label><span>Roll No</span><input id="profileEditRollNo" value="${escapeHtml(current.rollNo)}" required></label>
+        <label><span>Degree</span><input id="profileEditDegree" value="${escapeHtml(current.degree)}" required></label>
+        <label><span>Year</span><select id="profileEditYear" required>${[1,2,3,4,5].map(n => `<option value="${n}" ${String(n) === current.year ? "selected" : ""}>${yearLabel(n)}</option>`).join("")}</select></label>
       </div>
       <button class="btn btn-dark" type="submit">Save profile</button>
     </form>
@@ -2192,6 +2473,9 @@ function saveProfile(event) {
     name: document.getElementById("profileEditName").value.trim(),
     email: user.email || document.getElementById("profileEditEmail").value.trim(),
     college: document.getElementById("profileEditCollege").value.trim(),
+    rollNo: document.getElementById("profileEditRollNo").value.trim(),
+    degree: document.getElementById("profileEditDegree").value.trim(),
+    year: document.getElementById("profileEditYear").value,
     role: user.role || "attendee",
     id: user.id || `CLY-2026-${String(Math.floor(100 + Math.random() * 900))}`,
     joined: user.joined || "Aug 2026"
@@ -2204,21 +2488,93 @@ function saveProfile(event) {
   showToast("Profile updated successfully.");
 }
 
+/* ---------- Certificate templates (one per event theme) ---------- */
+const CERT_THEMES = {
+  Technical: { name: "Circuit",   bg: "#0f1b17", bg2: "#17302a", ink: "#eaf7ee", accent: "#c7f36a", sub: "#9fc3b0", motif: "circuit" },
+  Cultural:  { name: "Rangoli",   bg: "#fbf1e4", bg2: "#f6dcc0", ink: "#3b1d12", accent: "#c4572b", sub: "#8a5a44", motif: "rangoli" },
+  Sports:    { name: "Podium",    bg: "#10202e", bg2: "#1b3a52", ink: "#f4f8fb", accent: "#ffb703", sub: "#9db8cc", motif: "stripes" },
+  Academic:  { name: "Scholar",   bg: "#f3f0e8", bg2: "#e4e0d2", ink: "#171613", accent: "#8a6d2f", sub: "#6b685f", motif: "laurel" },
+  Art:       { name: "Palette",   bg: "#fff6f2", bg2: "#fadcd2", ink: "#2a1a22", accent: "#d6336c", sub: "#8c5d6e", motif: "blobs" },
+  Music:     { name: "Rhythm",    bg: "#1a1226", bg2: "#2e1d46", ink: "#f6f0ff", accent: "#b794f6", sub: "#a897c4", motif: "waves" }
+};
+function certTheme(category) { return CERT_THEMES[category] || { name: "Classic", bg: "#f3f0e8", bg2: "#e8eddf", ink: "#171613", accent: "#6b8f5e", sub: "#77756e", motif: "laurel" }; }
+
+function certMotif(t, W, H) {
+  const a = t.accent;
+  switch (t.motif) {
+    case "circuit": return `<g stroke="${a}" stroke-width="2" fill="none" opacity=".35"><path d="M40 120h120v60h80M40 200h70v80M${W-40} ${H-120}h-120v-60h-80M${W-40} ${H-200}h-70v-80"/></g><g fill="${a}" opacity=".6"><circle cx="240" cy="180" r="6"/><circle cx="110" cy="280" r="6"/><circle cx="${W-240}" cy="${H-180}" r="6"/><circle cx="${W-110}" cy="${H-280}" r="6"/></g>`;
+    case "rangoli": return [[90,90],[W-90,90],[90,H-90],[W-90,H-90]].map(([x,y]) => `<g transform="translate(${x} ${y})" fill="${a}" opacity=".35">${[0,45,90,135].map(r => `<ellipse rx="10" ry="40" transform="rotate(${r})"/>`).join("")}<circle r="8" fill="${t.ink}" opacity=".6"/></g>`).join("");
+    case "stripes": return `<g fill="${a}" opacity=".85"><path d="M0 0h${W}v22H0z"/><path d="M0 ${H-22}h${W}v22H0z"/></g><g fill="${t.sub}" opacity=".25"><path d="M0 40h${W}v6H0z"/><path d="M0 ${H-46}h${W}v6H0z"/></g>`;
+    case "laurel": return [60, W-60].map((x, i) => `<g transform="translate(${x} ${H/2}) scale(${i ? -1 : 1} 1)" fill="${a}" opacity=".4">${[-120,-80,-40,0,40,80,120].map(y => `<ellipse cx="${Math.abs(y)/6}" cy="${y}" rx="26" ry="9" transform="rotate(${y/3} 0 ${y})"/>`).join("")}</g>`).join("");
+    case "blobs": return `<circle cx="80" cy="80" r="90" fill="${a}" opacity=".18"/><circle cx="${W-70}" cy="${H-60}" r="110" fill="#f4a261" opacity=".22"/><circle cx="${W-150}" cy="70" r="40" fill="#4cc9f0" opacity=".22"/>`;
+    case "waves": return [0,1,2].map(i => `<path d="M0 ${H-90+i*22} Q ${W/8} ${H-130+i*22} ${W/4} ${H-90+i*22} T ${W/2} ${H-90+i*22} T ${3*W/4} ${H-90+i*22} T ${W} ${H-90+i*22}" stroke="${a}" stroke-width="3" fill="none" opacity="${.5-i*.14}"/>`).join("");
+  }
+  return "";
+}
+
+function buildCertificateSVG(cert, ev, name) {
+  const W = 1123, H = 794, t = certTheme(ev && ev.category);
+  const title = String((ev && ev.title) || cert.event || "Event");
+  const size = title.length > 34 ? 36 : title.length > 22 ? 44 : 54;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Certificate of ${escapeSvg(cert.type)}">
+  <defs><linearGradient id="cg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${t.bg}"/><stop offset="1" stop-color="${t.bg2}"/></linearGradient></defs>
+  <rect width="${W}" height="${H}" fill="url(#cg)"/>
+  ${certMotif(t, W, H)}
+  <rect x="34" y="34" width="${W-68}" height="${H-68}" rx="14" fill="none" stroke="${t.accent}" stroke-width="3"/>
+  <rect x="48" y="48" width="${W-96}" height="${H-96}" rx="8" fill="none" stroke="${t.accent}" stroke-width="1" opacity=".5"/>
+  <text x="${W/2}" y="135" text-anchor="middle" fill="${t.accent}" font-family="Arial, sans-serif" font-size="20" letter-spacing="8">CAMPUSLY</text>
+  <text x="${W/2}" y="215" text-anchor="middle" fill="${t.ink}" font-family="Georgia, serif" font-size="58">Certificate of ${escapeSvg(cert.type)}</text>
+  <text x="${W/2}" y="280" text-anchor="middle" fill="${t.sub}" font-family="Arial, sans-serif" font-size="20">This is proudly presented to</text>
+  <text x="${W/2}" y="375" text-anchor="middle" fill="${t.accent}" font-family="Georgia, serif" font-style="italic" font-size="68">${escapeSvg(name)}</text>
+  <line x1="300" y1="400" x2="${W-300}" y2="400" stroke="${t.accent}" stroke-width="1.5" opacity=".7"/>
+  <text x="${W/2}" y="455" text-anchor="middle" fill="${t.sub}" font-family="Arial, sans-serif" font-size="20">for ${cert.type === "Winner" ? "winning" : cert.type === "Runner-up" ? "finishing as runner-up in" : cert.type === "Volunteer" ? "volunteering at" : "participating in"}</text>
+  <text x="${W/2}" y="525" text-anchor="middle" fill="${t.ink}" font-family="Arial, sans-serif" font-weight="700" font-size="${size}">${escapeSvg(title)}</text>
+  <text x="${W/2}" y="575" text-anchor="middle" fill="${t.sub}" font-family="Arial, sans-serif" font-size="20">${escapeSvg((ev && ev.category) || "")} · ${escapeSvg((ev && ev.date) || "")}${ev && ev.venue ? " · " + escapeSvg(ev.venue) : ""}</text>
+  <line x1="150" y1="680" x2="400" y2="680" stroke="${t.sub}" stroke-width="1"/>
+  <text x="275" y="705" text-anchor="middle" fill="${t.sub}" font-family="Arial, sans-serif" font-size="16">${escapeSvg((ev && ev.organiser) || "Organiser")}</text>
+  <line x1="${W-400}" y1="680" x2="${W-150}" y2="680" stroke="${t.sub}" stroke-width="1"/>
+  <text x="${W-275}" y="705" text-anchor="middle" fill="${t.sub}" font-family="Arial, sans-serif" font-size="16">Issued ${escapeSvg(cert.date)}</text>
+  <text x="${W/2}" y="${H-62}" text-anchor="middle" fill="${t.sub}" font-family="Arial, sans-serif" font-size="13" letter-spacing="2" opacity=".8">ID ${escapeSvg(cert.passNo)} · ${escapeSvg(certTheme(ev && ev.category).name.toUpperCase())} TEMPLATE</text>
+</svg>`;
+}
+
+function previewCertType(id) {
+  const ev = events.find(e => e.id === id), box = document.getElementById("certPreview");
+  if (!ev || !box) return;
+  box.innerHTML = buildCertificateSVG({ type: document.getElementById("certType")?.value || "Participation", date: formatEventDate(new Date()), passNo: "CP-00-000" }, ev, "Participant Name");
+}
+
 function showCertificate(eventId) {
   const cert = certificates.find(c => Number(c.eventId) === Number(eventId));
   if (!cert) return;
-  const ev = events.find(e => e.id === Number(eventId)) || {};
+  const ev = events.find(e => e.id === Number(eventId)) || { title: cert.event };
   document.getElementById("modalContent").innerHTML = `
     <p class="eyebrow">DIGITAL CERTIFICATE</p>
     <h2>${escapeHtml(cert.event)}</h2>
-    <div class="soft-card" style="margin-top:22px;padding:35px;text-align:center;background:#e8eddf;color:#171613">
-      <div class="eyebrow">CERTIFICATE OF ${escapeHtml(cert.type).toUpperCase()}</div>
-      <div style="font-family:'Space Grotesk';font-size:28px;margin:12px 0">${escapeHtml(getUserName() || "Participant")}</div>
-      <div style="font-size:12px">${escapeHtml(cert.event)}${ev.organiser ? " · by " + escapeHtml(ev.organiser) : ""}</div>
-      <div style="font-size:11px;color:#777;margin-top:8px">Issued ${escapeHtml(cert.date)} · ${escapeHtml(cert.passNo)}</div>
-    </div>
+    <div class="cert-template-preview">${buildCertificateSVG(cert, ev, getUserName() || "Participant")}</div>
+    <div class="modal-actions-row"><button class="btn btn-dark" onclick="downloadCertificate(${Number(eventId)}, 'png')">Download PNG</button><button class="btn btn-outline" onclick="downloadCertificate(${Number(eventId)}, 'svg')">Download SVG</button></div>
   `;
   document.getElementById("modal").classList.remove("hidden");
+}
+
+function downloadCertificate(eventId, format) {
+  const cert = certificates.find(c => Number(c.eventId) === Number(eventId));
+  if (!cert) return;
+  const ev = events.find(e => e.id === Number(eventId)) || { title: cert.event };
+  const svg = buildCertificateSVG(cert, ev, getUserName() || "Participant");
+  const base = `${String(cert.event).replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-certificate`;
+  const save = (href, ext) => { const a = document.createElement("a"); a.href = href; a.download = `${base}.${ext}`; document.body.appendChild(a); a.click(); a.remove(); };
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+  if (format === "svg") { save(url, "svg"); setTimeout(() => URL.revokeObjectURL(url), 1000); showToast("Certificate downloaded."); return; }
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement("canvas"); c.width = 2246; c.height = 1588;
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    c.toBlob(b => { const u = URL.createObjectURL(b); save(u, "png"); setTimeout(() => URL.revokeObjectURL(u), 1000); showToast("Certificate downloaded."); });
+    URL.revokeObjectURL(url);
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); showToast("Couldn't make a PNG; try the SVG download."); };
+  img.src = url;
 }
 
 function renderCertificatesPage() {
@@ -2265,7 +2621,7 @@ function renderCreateEvent() {
             </div>
             <div class="form-field">
               <label>Date</label>
-              <input id="newDate" required placeholder="Sep 30, 2026">
+              <input id="newDate" type="date" required min="${toISODate(startOfToday())}">
             </div>
             <div class="form-field">
               <label>Time</label>
@@ -2291,6 +2647,11 @@ function renderCreateEvent() {
               <label>Description</label>
               <textarea id="newDescription" required placeholder="Tell students what makes this event worth attending..."></textarea>
             </div>
+            <div class="form-field full fb-section">
+              <label>Registration form</label>
+              <p class="fb-hint" id="formBuilderHint"></p>
+              <div id="formBuilderBox"></div>
+            </div>
           </div>
           <div class="form-actions">
             <button type="submit" class="btn btn-dark">Publish event ↗</button>
@@ -2305,6 +2666,97 @@ function renderCreateEvent() {
 function toggleTeamRange() {
   const isTeam = document.getElementById("newRegistrationMode")?.value === "team";
   document.getElementById("teamRangeFields")?.classList.toggle("hidden", !isTeam);
+  // Untouched defaults follow the registration type; anything the organiser edited is kept.
+  if (!builderDirty) builderFields = defaultFormFields(isTeam ? "team" : "individual");
+  renderFormBuilder(isTeam ? "team" : "individual");
+}
+
+/* ---------- Form builder (create page + "Edit form" on the manage page) ---------- */
+let builderFields = [], builderDirty = false;
+
+function startFormBuilder(fields, mode) {
+  builderFields = sanitizeFields(fields, mode).map(f => ({ ...f, options: f.options ? [...f.options] : undefined }));
+  builderDirty = !!fields;
+  renderFormBuilder(mode);
+}
+
+function renderFormBuilder(mode) {
+  const box = document.getElementById("formBuilderBox");
+  if (!box) return;
+  const isTeam = mode === "team";
+  const hint = document.getElementById("formBuilderHint");
+  if (hint) hint.textContent = isTeam
+    ? "Fields every team member fills in. Name and Email are always asked; add, remove or reorder the rest."
+    : "Fields every participant fills in. Name and Email are always asked; add or remove the rest.";
+  box.dataset.mode = isTeam ? "team" : "individual";
+  box.innerHTML = `
+    <div class="fb-list">
+      ${builderFields.map((f, i) => `
+        <div class="fb-row ${f.locked ? "is-locked" : ""}">
+          <input class="fb-label" value="${escapeHtml(f.label)}" ${f.locked ? "readonly" : ""} maxlength="60" placeholder="Field label" aria-label="Field label" oninput="builderUpdate(${i}, 'label', this.value)">
+          <select class="fb-type" ${f.locked ? "disabled" : ""} aria-label="Field type" onchange="builderUpdate(${i}, 'type', this.value, true)">
+            ${Object.entries(FIELD_TYPES).map(([k, name]) => `<option value="${k}" ${k === f.type ? "selected" : ""}>${name}</option>`).join("")}
+          </select>
+          <label class="fb-req"><input type="checkbox" ${f.required ? "checked" : ""} ${f.locked ? "disabled" : ""} onchange="builderUpdate(${i}, 'required', this.checked)"> Required</label>
+          <div class="fb-tools">
+            ${f.locked ? `<span class="fb-lock">Always asked</span>` : `
+              <button type="button" class="fb-icon" title="Move up" ${i <= 2 ? "disabled" : ""} onclick="builderMove(${i}, -1)">↑</button>
+              <button type="button" class="fb-icon" title="Move down" ${i === builderFields.length - 1 ? "disabled" : ""} onclick="builderMove(${i}, 1)">↓</button>
+              <button type="button" class="fb-remove" onclick="builderRemove(${i})">Remove</button>`}
+          </div>
+          ${f.type === "select" ? `<input class="fb-options" value="${escapeHtml((f.options || []).join(", "))}" placeholder="Options, separated by commas (e.g. S, M, L)" aria-label="Dropdown options" oninput="builderUpdate(${i}, 'options', this.value)">` : ""}
+        </div>`).join("")}
+    </div>
+    <button type="button" class="btn btn-outline fb-add" ${builderFields.length >= MAX_FORM_FIELDS ? "disabled" : ""} onclick="builderAdd()">+ Add field</button>`;
+}
+
+function builderMode() { return document.getElementById("formBuilderBox")?.dataset.mode || "individual"; }
+
+function builderUpdate(i, key, value, rerender) {
+  const f = builderFields[i];
+  if (!f || f.locked) return;
+  builderDirty = true;
+  if (key === "options") f.options = String(value).split(",").map(o => o.trim()).filter(Boolean);
+  else f[key] = value;
+  if (key === "type" && value === "select" && !(f.options || []).length) f.options = ["Option 1", "Option 2"];
+  if (rerender) renderFormBuilder(builderMode());
+}
+
+function builderAdd() {
+  if (builderFields.length >= MAX_FORM_FIELDS) return;
+  builderDirty = true;
+  builderFields.push({ id: "f" + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36), label: "", type: "text", required: false });
+  renderFormBuilder(builderMode());
+  const labels = document.querySelectorAll("#formBuilderBox .fb-label");
+  labels[labels.length - 1]?.focus();
+}
+
+function builderRemove(i) {
+  if (!builderFields[i] || builderFields[i].locked) return;
+  builderDirty = true;
+  builderFields.splice(i, 1);
+  renderFormBuilder(builderMode());
+}
+
+function builderMove(i, dir) {
+  const j = i + dir;
+  if (!builderFields[i] || builderFields[i].locked || j < 2 || j >= builderFields.length) return;
+  builderDirty = true;
+  [builderFields[i], builderFields[j]] = [builderFields[j], builderFields[i]];
+  renderFormBuilder(builderMode());
+}
+
+// Returns the cleaned field list, or null (after telling the organiser what to fix).
+function readBuilderFields(mode) {
+  const names = new Set();
+  for (const f of builderFields) {
+    if (!String(f.label || "").trim()) { showToast("Every form field needs a label. Fill it in or remove the field."); return null; }
+    const key = f.label.trim().toLowerCase();
+    if (names.has(key)) { showToast(`Two fields are both called "${f.label.trim()}". Give each field its own label.`); return null; }
+    names.add(key);
+    if (f.type === "select" && (f.options || []).filter(Boolean).length < 2) { showToast(`"${f.label.trim()}" needs at least two dropdown options.`); return null; }
+  }
+  return sanitizeFields(builderFields, mode);
 }
 
 function publishEvent(event) {
@@ -2320,6 +2772,10 @@ function publishEvent(event) {
     Music: "cover-music"
   };
 
+  const pickedDate = parseEventDate(document.getElementById("newDate").value);
+  if (!pickedDate) { showToast("Please choose a valid event date."); return; }
+  if (pickedDate < startOfToday()) { showToast("Event date can't be in the past. Choose today or a later date."); return; }
+
   const mode = document.getElementById("newRegistrationMode").value;
   let range = { min: 2, max: 4 };
   if (mode === "team") {
@@ -2332,17 +2788,22 @@ function publishEvent(event) {
     if (range.min < 1 || range.min > range.max) { showToast("Team size range is invalid. Use a range like 2-4."); return; }
   }
 
+  const formFields = readBuilderFields(mode);
+  if (!formFields) return;
+
   const newEvent = {
     id: Date.now(),
     title: document.getElementById("newTitle").value,
     category,
-    date: document.getElementById("newDate").value,
+    date: formatEventDate(pickedDate),
+    dateISO: toISODate(pickedDate),
     time: document.getElementById("newTime").value,
     venue: document.getElementById("newVenue").value,
     seats: Number(document.getElementById("newSeats").value),
     registered: 0,
     registrationMode: mode,
     ...(mode === "team" ? { teamMin: range.min, teamMax: range.max } : {}),
+    formFields,
     description: document.getElementById("newDescription").value,
     cover: coverMap[category],
     organiser: getUserName() || "Campusly Organizer",
@@ -2399,6 +2860,7 @@ function renderManageBody() {
               <td>${r.filter(x => x.certificate).length}</td>
               <td>
                 <button class="btn btn-outline" onclick="showParticipants(${event.id})">Participants</button>
+                <button class="btn btn-outline" onclick="showFormEditor(${event.id})">Form</button>
                 <button class="btn btn-outline" onclick="showAttendance(${event.id})">Attendance</button>
                 <button class="btn btn-light" onclick="showCertificates(${event.id})">Certificates</button>
               </td>
@@ -2415,9 +2877,21 @@ function manageGuard(id) {
   return event && isOwnEvent(event) ? event : null;
 }
 
-function peopleRows(list, action) {
+// What a registrant (or each team member) answered, shown under their row for the organiser.
+function registrationDetailHtml(r) {
+  const extras = answers => (answers || []).filter(a => !LOCKED_FIELD_IDS.includes(a.id) && a.value).map(a => `<span><b>${escapeHtml(a.label)}:</b> ${escapeHtml(a.value)}</span>`).join("");
+  let body = "";
+  if (r.mode === "team" && Array.isArray(r.memberList) && r.memberList.length) {
+    body = r.memberList.map((m, i) => `<div class="reg-member"><strong>Member ${i + 1}${i === 0 ? " (lead)" : ""}: ${escapeHtml(m.name)}</strong><span>${escapeHtml(m.email)}</span>${extras(m.answers)}</div>`).join("");
+  } else {
+    body = extras(r.answers);
+  }
+  return body ? `<details class="reg-details"><summary>${r.mode === "team" ? "Team members" : "Registration details"}</summary>${body}</details>` : "";
+}
+
+function peopleRows(list, action, detail) {
   return list.length ? `<div class="people-list">${list.map(r => `
-    <div class="people-row"><div><strong>${escapeHtml(r.name)}</strong><small>${escapeHtml(r.email)}${r.teamName ? " · Team " + escapeHtml(r.teamName) : ""} · ${escapeHtml(r.passNo)}</small></div>${action(r)}</div>`).join("")}</div>`
+    <div class="people-row"><div><strong>${escapeHtml(r.name)}</strong><small>${escapeHtml(r.email)}${r.teamName ? " · Team " + escapeHtml(r.teamName) : ""} · ${escapeHtml(r.passNo)}</small>${detail ? detail(r) : ""}</div>${action(r)}</div>`).join("")}</div>`
     : `<div class="soft-card empty-card"><p class="eyebrow">NO REGISTRATIONS YET</p><p>Participants will show up here as they register.</p></div>`;
 }
 
@@ -2428,9 +2902,35 @@ function showParticipants(id) {
     <p class="eyebrow">PARTICIPANTS · ${escapeHtml(event.category)}</p>
     <h2>${escapeHtml(event.title)}</h2>
     <p>${list.length} registered out of ${event.seats} places.</p>
-    ${peopleRows(list, r => `<span class="status">${r.attended ? "Checked in" : "Registered"}</span>`)}
+    ${peopleRows(list, r => `<span class="status">${r.attended ? "Checked in" : "Registered"}</span>`, registrationDetailHtml)}
   `;
   document.getElementById("modal").classList.remove("hidden");
+}
+
+function showFormEditor(id) {
+  const event = manageGuard(id); if (!event) return;
+  const mode = event.registrationMode || "individual";
+  const count = eventRegistry(id).length;
+  document.getElementById("modalContent").innerHTML = `
+    <p class="eyebrow">REGISTRATION FORM · ${mode === "team" ? "TEAM" : "INDIVIDUAL"}</p>
+    <h2>${escapeHtml(event.title)}</h2>
+    <p class="fb-hint" id="formBuilderHint"></p>
+    ${count ? `<div class="gate-note">${count} ${count === 1 ? "person has" : "people have"} already registered. They keep the answers they gave; only new registrations see the changes.</div>` : ""}
+    <div id="formBuilderBox"></div>
+    <div class="modal-actions-row"><button class="btn btn-dark" onclick="saveFormEditor(${id})">Save form</button><button class="btn btn-light" onclick="closeModal()">Cancel</button></div>
+  `;
+  startFormBuilder(event.formFields, mode);
+  document.getElementById("modal").classList.remove("hidden");
+}
+
+function saveFormEditor(id) {
+  const event = manageGuard(id); if (!event) return;
+  const fields = readBuilderFields(event.registrationMode || "individual");
+  if (!fields) return;
+  event.formFields = fields;
+  saveData("campuslyEvents", events);
+  closeModal();
+  showToast("Registration form updated.");
 }
 
 function showAttendance(id) {
@@ -2440,21 +2940,26 @@ function showAttendance(id) {
     <p class="eyebrow">ATTENDANCE · ${escapeHtml(event.category)}</p>
     <h2>${escapeHtml(event.title)}</h2>
     <p>${done} of ${list.length} checked in. You can also scan passes from the Scanner page.</p>
-    ${list.length ? `<div class="modal-actions-row"><button class="btn btn-dark" onclick="markAllAttendance(${id})">Mark everyone present</button><button class="btn btn-outline" onclick="closeModal();navigate('scanner')">Open scanner ↗</button></div>` : ""}
-    ${peopleRows(list, r => `<button class="btn ${r.attended ? "btn-light" : "btn-outline"}" onclick="toggleAttendance('${r.passNo}', ${id})">${r.attended ? "Present ✓ (undo)" : "Mark present"}</button>`)}
+    ${eventHasStarted(event) ? "" : `<div class="gate-note">Attendance marking opens on ${escapeHtml(event.date)}.</div>`}
+    ${list.length ? `<div class="modal-actions-row"><button class="btn btn-dark" ${eventHasStarted(event) ? "" : "disabled"} onclick="markAllAttendance(${id})">Mark everyone present</button><button class="btn btn-outline" onclick="closeModal();navigate('scanner')">Open scanner ↗</button></div>` : ""}
+    ${peopleRows(list, r => `<button class="btn ${r.attended ? "btn-light" : "btn-outline"}" ${eventHasStarted(event) ? "" : "disabled"} onclick="toggleAttendance('${r.passNo}', ${id})">${r.attended ? "Present ✓ (undo)" : "Mark present"}</button>`)}
   `;
   document.getElementById("modal").classList.remove("hidden");
 }
 
 function toggleAttendance(passNo, id) {
   const entry = readRegistry().find(r => r.passNo === passNo);
-  if (!entry || !manageGuard(entry.eventId)) return;
+  const ev = entry && manageGuard(entry.eventId);
+  if (!ev) return;
+  if (!eventHasStarted(ev)) { showToast(`Attendance opens on ${ev.date}.`); return; }
   setAttendance(passNo, !entry.attended);
   refreshManage(); showAttendance(id);
 }
 
 function markAllAttendance(id) {
-  if (!manageGuard(id)) return;
+  const ev = manageGuard(id);
+  if (!ev) return;
+  if (!eventHasStarted(ev)) { showToast(`Attendance opens on ${ev.date}.`); return; }
   eventRegistry(id).filter(r => !r.attended).forEach(r => setAttendance(r.passNo, true));
   refreshManage(); showAttendance(id); showToast("Everyone is marked present.");
 }
@@ -2466,24 +2971,31 @@ function showCertificates(id) {
     <p class="eyebrow">CERTIFICATES · ${escapeHtml(event.category)}</p>
     <h2>${escapeHtml(event.title)}</h2>
     <p>Certificates can be issued to participants who were checked in. ${list.filter(r => r.certificate).length} issued so far.</p>
+    ${eventHasStarted(event) ? "" : `<div class="gate-note">Certificate issuing opens on ${escapeHtml(event.date)}.</div>`}
+    <div class="cert-template-preview" id="certPreview">${buildCertificateSVG({ type: "Participation", date: formatEventDate(new Date()), passNo: "CP-00-000" }, event, "Participant Name")}</div>
+    <p class="muted-note">Template: ${escapeHtml(certTheme(event.category).name)} · matches the “${escapeHtml(event.category)}” event theme.</p>
     <div class="modal-actions-row">
-      <select id="certType" class="cert-type"><option>Participation</option><option>Winner</option><option>Runner-up</option><option>Volunteer</option></select>
-      ${ready ? `<button class="btn btn-dark" onclick="issueAllCertificates(${id})">Issue to all checked-in (${ready})</button>` : ""}
+      <select id="certType" class="cert-type" onchange="previewCertType(${id})"><option>Participation</option><option>Winner</option><option>Runner-up</option><option>Volunteer</option></select>
+      ${ready && eventHasStarted(event) ? `<button class="btn btn-dark" onclick="issueAllCertificates(${id})">Issue to all checked-in (${ready})</button>` : ""}
     </div>
-    ${peopleRows(list, r => r.certificate ? `<span class="status">${escapeHtml(r.certificate.type)} ✓</span>` : r.attended ? `<button class="btn btn-outline" onclick="issueOne('${r.passNo}', ${id})">Issue</button>` : `<span class="status muted">Not checked in</span>`)}
+    ${peopleRows(list, r => r.certificate ? `<span class="status">${escapeHtml(r.certificate.type)} ✓</span>` : r.attended ? `<button class="btn btn-outline" ${eventHasStarted(event) ? "" : "disabled"} onclick="issueOne('${r.passNo}', ${id})">Issue</button>` : `<span class="status muted">Not checked in</span>`)}
   `;
   document.getElementById("modal").classList.remove("hidden");
 }
 
 function issueOne(passNo, id) {
   const entry = readRegistry().find(r => r.passNo === passNo);
-  if (!entry || !manageGuard(entry.eventId)) return;
+  const ev = entry && manageGuard(entry.eventId);
+  if (!ev) return;
+  if (!eventHasStarted(ev)) { showToast(`Certificates open on ${ev.date}.`); return; }
   issueCertificate(passNo, document.getElementById("certType")?.value || "Participation");
   refreshManage(); showCertificates(id);
 }
 
 function issueAllCertificates(id) {
-  if (!manageGuard(id)) return;
+  const ev = manageGuard(id);
+  if (!ev) return;
+  if (!eventHasStarted(ev)) { showToast(`Certificates open on ${ev.date}.`); return; }
   const type = document.getElementById("certType")?.value || "Participation";
   eventRegistry(id).filter(r => r.attended && !r.certificate).forEach(r => issueCertificate(r.passNo, type));
   refreshManage(); showCertificates(id); showToast("Certificates issued.");
@@ -2773,6 +3285,7 @@ async function logout() {
 
 function showToast(message) {
   const toast = document.getElementById("toast");
+  if (!toast) return;
   toast.textContent = message;
   toast.classList.add("show");
 
@@ -2795,12 +3308,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (CampuslyAuth.mode === "local") {
       document.querySelector(".signup-provider-row")?.classList.add("hidden");
       if (note) note.textContent = "Local mode · accounts are stored only in this browser. Add your Firebase config to enable cloud accounts.";
-    } else if (note) {
-      note.textContent = "Passwords are handled securely by Firebase Authentication.";
     }
   }
 
-  const session = await CampuslyAuth.ready;
+  // FAST PATH: a signed-in browser already has its session + data in localStorage, so draw the
+  // page straight away and let Firebase confirm the session / pull cloud data in the background.
+  // Only a first visit (nothing cached) has to wait for the auth check.
+  const cachedSession = isAuthPage ? null : readCachedSession();
+  const session = cachedSession || await CampuslyAuth.ready;
 
   if (isAuthPage) {
     if (session) { window.location.href = "home.html"; return; }
@@ -2818,6 +3333,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
+  reloadAppData();
   currentRole = getMode(session);
   const organiserPages = ["create", "manage", "scanner"], participantPages = ["wallet", "registrations", "certificates"];
   if ((currentRole === "attendee" && organiserPages.includes(page)) || (currentRole === "organiser" && participantPages.includes(page))) {
@@ -2833,6 +3349,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   syncRecords();
   updateUserInterface();
   renderCurrentPage();
+  hideLoading();
+  setupLinkPrefetch();
+
+  // Background verification of a cached session.
+  if (cachedSession) {
+    CampuslyAuth.ready.then(real => {
+      if (!real) { window.location.replace("index.html"); return; }                      // signed out / expired
+      if (real.uid !== cachedSession.uid || real.role !== cachedSession.role) { window.location.reload(); return; }
+      if (CampuslyAuth.cloudChanged()) refreshFromCloud();                                 // newer data arrived
+    }).catch(() => {});
+  }
 
   window.addEventListener("storage", e => {
     if (!e.key) return;
@@ -2847,6 +3374,54 @@ document.addEventListener("DOMContentLoaded", async () => {
     window.scrollTo(0, y);
   });
 });
+
+function readCachedSession() {
+  try {
+    const user = JSON.parse(localStorage.getItem("campuslyUser") || "null");
+    return user && user.uid ? user : null;
+  } catch (e) { return null; }
+}
+
+// Re-draw the page after cloud data finished loading, without jumping the scroll or interrupting the user.
+function refreshFromCloud() {
+  const modal = document.getElementById("modal");
+  if ((modal && !modal.classList.contains("hidden")) || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || "")) return;
+  const y = window.scrollY;
+  reloadAppData();
+  syncRecords();
+  updateUserInterface();
+  renderCurrentPage();
+  window.scrollTo(0, y);
+}
+
+// Prefetch the small HTML pages so clicking a link feels instant (scripts/styles are already cached).
+function setupLinkPrefetch() {
+  if (navigator.connection && navigator.connection.saveData) return;
+  const done = new Set();
+  const prefetch = href => {
+    if (!href || done.has(href)) return;
+    done.add(href);
+    const link = document.createElement("link");
+    link.rel = "prefetch";
+    link.href = href;
+    link.as = "document";
+    document.head.appendChild(link);
+  };
+  const pageOf = a => {
+    if (!a || !a.getAttribute) return "";
+    const h = a.getAttribute("href") || "";
+    return /^[a-z-]+\.html$/i.test(h) ? h : "";
+  };
+  const onIntent = e => prefetch(pageOf(e.target.closest && e.target.closest("a")));
+  document.addEventListener("mouseover", onIntent, { passive: true });
+  document.addEventListener("touchstart", onIntent, { passive: true });
+  document.addEventListener("focusin", onIntent);
+  // Warm the visible main-nav pages once the browser is idle.
+  const idle = window.requestIdleCallback || (fn => setTimeout(fn, 1200));
+  idle(() => {
+    document.querySelectorAll(".main-nav a").forEach(a => { if (a.offsetParent !== null) prefetch(pageOf(a)); });
+  });
+}
 
 
 /* ---------- THEME + MICRO INTERACTIONS ---------- */
@@ -2895,4 +3470,4 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
 
-window.addEventListener("load", () => { setTimeout(hideLoading, 700); });
+window.addEventListener("load", hideLoading);

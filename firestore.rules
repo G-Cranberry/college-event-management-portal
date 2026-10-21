@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Profile: only the owner; role can't be changed after sign-up.
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null && request.auth.uid == uid
+                    && request.resource.data.role in ['attendee', 'organiser'];
+      allow update: if request.auth != null && request.auth.uid == uid
+                    && request.resource.data.role == resource.data.role;
+    }
+    // Each user's registrations, certificates and attendance.
+    match /userData/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+    // Events, pass registry, gallery, rides, bus bookings: shared by all signed-in users.
+    match /shared/{key} {
+      allow read, write: if request.auth != null;
+    }
+    // Notifications: organisers write to attendees, so any signed-in user may write.
+    match /notifs/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if request.auth != null;
+    }
+  }
+}

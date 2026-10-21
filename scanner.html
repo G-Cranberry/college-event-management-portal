@@ -8,9 +8,18 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://www.gstatic.com">
+<link rel="preconnect" href="https://firestore.googleapis.com">
+<link rel="preload" as="script" href="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js">
+<link rel="preload" as="script" href="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js">
+<link rel="preload" as="script" href="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js">
+<link rel="preload" as="script" href="firebase-config.js">
+<link rel="preload" as="script" href="auth.js">
+<link rel="preload" as="script" href="script.js">
 <link rel="stylesheet" href="style.css">
 </head>
 <body data-page="scanner">
+<script>(function(){try{var u=JSON.parse(localStorage.getItem("campuslyUser")||"null")||{};var id=u.uid||u.email||"guest";var m=localStorage.getItem("campuslyMode:"+id);var r=(m==="organiser"||m==="attendee")?m:(u.role==="organiser"?"organiser":"attendee");document.body.classList.add("role-"+r);}catch(e){document.body.classList.add("role-attendee");}})();</script>
 <div id="loadingScreen" class="loading-screen is-hidden" aria-hidden="true"><div class="loading-orbit loading-orbit-one"></div><div class="loading-orbit loading-orbit-two"></div><div class="loading-card"><div class="loading-mark">C<span>.</span></div><p class="eyebrow">CAMPUSLY</p><h1>Loading your<br><em>campus.</em></h1><div class="loading-line"><span></span></div><small>Preparing your events & passes</small></div></div>
 <div id="app" class="app">
 <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div><div id="cursorGlow" class="cursor-glow"></div><div class="bg-grid" aria-hidden="true"></div><div class="bg-orb bg-orb-one" aria-hidden="true"></div><div class="bg-orb bg-orb-two" aria-hidden="true"></div><div class="bg-orb bg-orb-three" aria-hidden="true"></div><div class="bg-particles" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="pinterest-bg" aria-hidden="true"><div class="pin-blob pin-blob-a"></div><div class="pin-blob pin-blob-b"></div><div class="pin-blob pin-blob-c"></div><div class="pin-arc pin-arc-a"></div><div class="pin-arc pin-arc-b"></div><div class="pin-note pin-note-a"><span>DISCOVER</span><b>new ideas</b></div><div class="pin-note pin-note-b"><span>EVENTS</span><b>make memories</b></div><div class="pin-note pin-note-c"><span>CAMPUSLY</span><b>one place.</b></div><div class="pin-dot pin-dot-a"></div><div class="pin-dot pin-dot-b"></div><div class="pin-dot pin-dot-c"></div></div><div class="scroll-progress" id="scrollProgress"></div>
@@ -30,12 +39,48 @@
   <div class="nav-actions">
     <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"><span class="theme-icon">☾</span><span class="theme-text">Dark</span></button>
     <button class="notification-btn" onclick="toggleNotifications(event)" aria-label="Notifications">○<span></span></button>
-    <div class="profile-chip" onclick="toggleProfileMenu()"><div id="profileAvatar" class="avatar">A</div><div class="profile-name"><strong id="profileName">Aarav</strong><small id="profileRole">ATTENDEE</small></div><span>⌄</span></div>
+    <div class="profile-chip" onclick="toggleProfileMenu()"><div id="profileAvatar" class="avatar"></div><div class="profile-name"><strong id="profileName"></strong><small id="profileRole"></small></div><span>⌄</span></div>
     <div id="profileMenu" class="profile-menu"><a href="profile.html">Profile</a><button onclick="logout()">Log out</button></div>
   </div>
 </header>
+<script>(function(){try{var u=JSON.parse(localStorage.getItem("campuslyUser")||"null")||{};var n=(u.name||"").trim()||(u.email||"").split("@")[0]||"";var o=document.body.classList.contains("role-organiser");var a=document.getElementById("profileAvatar"),p=document.getElementById("profileName"),r=document.getElementById("profileRole");if(p)p.textContent=n||"Guest";if(a)a.textContent=(n||"G").charAt(0).toUpperCase();if(r)r.textContent=o?"ORGANIZER":"PARTICIPANT";}catch(e){}})();</script>
 <main id="pageContent"></main>
-<footer class="footer"><div><a class="brand" href="home.html">CAMPUSLY<span>.</span></a><p>One campus. Endless experiences.</p></div><div class="footer-links"><a href="events.html">Events</a><a href="transport.html">Transport</a><a href="wallet.html" class="attendee-only">Wallet</a><a href="gallery.html">Gallery</a><a href="profile.html">Profile</a></div><small>© 2026 Campusly</small></footer>
+<footer class="footer">
+  <div class="footer-main">
+    <div class="footer-about">
+      <a class="brand" href="home.html">CAMPUSLY<span>.</span></a>
+      <p class="footer-tagline">One campus. Endless experiences.</p>
+      <p class="footer-blurb">Campusly brings campus events, registrations, passes, transport and certificates into one simple place for students and organisers.</p>
+    </div>
+    <nav class="footer-col" aria-label="Explore">
+      <h4>Explore</h4>
+      <a href="home.html">Home</a>
+      <a href="events.html">Events</a>
+      <a href="transport.html">Transport</a>
+      <a href="gallery.html">Gallery</a>
+    </nav>
+    <nav class="footer-col" aria-label="Your space">
+      <h4>Your space</h4>
+      <a class="attendee-only" href="wallet.html">Wallet</a>
+      <a class="attendee-only" href="registrations.html">My Registrations</a>
+      <a class="attendee-only" href="certificates.html">Certificates</a>
+      <a class="organiser-only" href="create.html">Create Event</a>
+      <a class="organiser-only" href="manage.html">Manage Events</a>
+      <a class="organiser-only" href="scanner.html">Scanner</a>
+      <a href="profile.html">Profile</a>
+    </nav>
+    <div class="footer-col footer-contact" id="contact">
+      <h4>Contact</h4>
+      <a href="mailto:hello@campusly.example">hello@campusly.example</a>
+      <span>Student Activity Centre, Main Campus</span>
+      <span>Mon – Sat · 9:00 AM – 5:00 PM</span>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <small>© 2026 Campusly. Made for campus life.</small>
+    <a class="footer-top" href="#" onclick="window.scrollTo({top:0,behavior:'smooth'});return false;">Back to top ↑</a>
+  </div>
+</footer>
 <div class="radial-nav" id="radialNav">
   <div class="nav-backdrop" data-nav-close></div>
   <div class="radial-orbit" aria-label="Radial navigation">

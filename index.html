@@ -3,64 +3,49 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Campusly — Sign In</title>
-  <meta name="description" content="Campusly college event management portal.">
+  <title>Campusly — Sign Up</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://www.gstatic.com">
+  <link rel="preconnect" href="https://firestore.googleapis.com">
+  <link rel="preload" as="script" href="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js">
+  <link rel="preload" as="script" href="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js">
+  <link rel="preload" as="script" href="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js">
+  <link rel="preload" as="script" href="firebase-config.js">
+  <link rel="preload" as="script" href="auth.js">
+  <link rel="preload" as="script" href="script.js">
   <link rel="stylesheet" href="style.css">
 </head>
-<body data-page="login">
-  <div id="loadingScreen" class="loading-screen" aria-hidden="true">
-    <div class="loading-orbit loading-orbit-one"></div>
-    <div class="loading-orbit loading-orbit-two"></div>
-    <div class="loading-card">
-      <div class="loading-mark">C<span>.</span></div>
-      <p class="eyebrow">CAMPUSLY</p>
-      <h1>Loading your<br><em>campus.</em></h1>
-      <div class="loading-line"><span></span></div>
-      <small>Preparing your events & passes</small>
-    </div>
-  </div>
-
-  <section id="loginScreen" class="login-screen">
+<body data-page="signup">
+  <button id="themeToggle" class="theme-toggle auth-theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle theme"><span class="theme-icon">☾</span><span class="theme-text">Dark</span></button>
+  <section class="login-screen signup-screen-page">
     <div class="login-visual">
-      <div class="login-top">
-        <a class="brand brand-light" href="index.html">CAMPUSLY<span>.</span></a>
-        <span class="eyebrow">COLLEGE EVENT PLATFORM</span>
-      </div>
-      <div class="visual-copy">
-        <p class="eyebrow">ONE PLACE. EVERY EVENT.</p>
-        <h1>Make campus<br><em>feel alive.</em></h1>
-        <p>Discover events, join communities, find a ride and keep every achievement in one beautiful place.</p>
-      </div>
-      <div class="floating-stat stat-one"><strong>48</strong><span>events this month</span></div>
-      <div class="floating-stat stat-two"><strong>2.4k</strong><span>active attendees</span></div>
-      <div class="visual-orbit"><span>TECH</span><span>CULTURE</span><span>SPORTS</span><span>ART</span></div>
+      <div class="login-top"><a class="brand brand-light" href="index.html">CAMPUSLY<span>.</span></a><span class="eyebrow">CREATE YOUR SPACE</span></div>
+      <div class="visual-copy"><p class="eyebrow">CAMPUS / COMMUNITY / CREATE</p><h1>Your next<br><em>experience.</em></h1><p>Set up your account once, then keep every campus event, pass and achievement in one place.</p></div>
+      <div class="floating-stat stat-one"><strong>QR</strong><span>smart event passes</span></div>
+      <div class="floating-stat stat-two"><strong>24/7</strong><span>campus activity</span></div>
+      <div class="visual-orbit"><span>PASS</span><span>EVENTS</span><span>WALLET</span><span>PROFILE</span></div>
     </div>
-
     <div class="login-panel">
       <div class="mobile-brand"><a class="brand" href="index.html">CAMPUSLY<span>.</span></a></div>
-      <div class="login-heading">
-        <p class="eyebrow">WELCOME BACK</p>
-        <h2>Sign in to<br><span>your campus.</span></h2>
-        <p>Use your Campusly account to continue as an attendee or organiser.</p>
-      </div>
-      <form id="signinForm" class="signup-form" onsubmit="signInUser(event)" novalidate>
-        <div class="signup-provider-row">
-          <button type="button" class="google-btn" onclick="googleAuth()"><span class="google-mark">G</span> Continue with Google</button>
-          <div class="signup-divider"><span>or sign in with email</span></div>
-        </div>
-        <div class="signup-grid">
-          <label class="signup-field full"><span>Email</span><input id="signinEmail" type="email" required autocomplete="email" placeholder="you@college.edu"></label>
-          <label class="signup-field full"><span>Password</span><input id="signinPassword" type="password" required autocomplete="current-password" placeholder="Your password"></label>
+      <div class="auth-switch signup-switch"><span>Already have an account?</span><button type="button" onclick="window.location.href='signin.html'">Sign in</button></div>
+      <div class="login-heading signup-heading"><p class="eyebrow">JOIN CAMPUSLY</p><h2>Create your<br><span>account.</span></h2><p>Choose your role and set up your student or organiser profile.</p></div>
+      <form id="signupForm" class="signup-form" onsubmit="signupUser(event)" novalidate>
+                <div class="signup-grid">
+          <label class="signup-field"><span>Full name</span><input id="signupName" required autocomplete="name" placeholder="Your name"></label>
+          <label class="signup-field"><span>Email</span><input id="signupEmail" required type="email" autocomplete="email" placeholder="you@college.edu"></label>
+          <label class="signup-field full"><span>College / University</span><input id="signupCollege" required autocomplete="organization" placeholder="Your college"></label>
+          <label class="signup-field"><span>Roll No</span><input id="signupRollNo" required autocomplete="off" placeholder="e.g. 21CS101"></label>
+          <label class="signup-field"><span>Degree</span><input id="signupDegree" required autocomplete="off" placeholder="e.g. B.Tech CSE" list="degreeList"><datalist id="degreeList"><option value="B.Tech"><option value="B.E."><option value="B.Sc"><option value="B.Com"><option value="BBA"><option value="BCA"><option value="B.A."><option value="M.Tech"><option value="M.Sc"><option value="MBA"><option value="MCA"><option value="Ph.D"></datalist></label>
+          <label class="signup-field full"><span>Year</span><select id="signupYear" required><option value="" disabled selected>Select your year</option><option value="1">1st year</option><option value="2">2nd year</option><option value="3">3rd year</option><option value="4">4th year</option><option value="5">5th year</option></select></label>
+          <label class="signup-field"><span>Password</span><input id="signupPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="At least 8 characters"></label>
+          <label class="signup-field"><span>Confirm password</span><input id="signupConfirm" type="password" required minlength="8" autocomplete="new-password" placeholder="Repeat your password"></label>
+          <label class="signup-field full"><span>Continue as</span><select id="signupRole"><option value="attendee">Participant / Student</option><option value="organiser">Organizer</option></select><small class="signup-hint">You can switch between Participant and Organizer any time from your profile menu.</small></label>
         </div>
         <p id="authMessage" class="auth-message" role="alert" hidden></p>
-        <button class="btn btn-dark signup-submit" type="submit">Sign in <span>→</span></button>
-        <button type="button" class="auth-link" onclick="forgotPassword()">Forgot password?</button>
+        <button class="btn btn-dark signup-submit" type="submit">Create account <span>→</span></button>
       </form>
-      <div class="auth-switch"><span>New to Campusly?</span><button type="button" onclick="window.location.href='signup.html'">Create an account</button></div>
-      <p class="login-note" id="authModeNote"></p>
     </div>
   </section>
   <script src="firebase-config.js"></script>

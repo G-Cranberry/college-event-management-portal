@@ -699,34 +699,6 @@ body.dark-mode .signup-field select {
   box-shadow: 0 5px 25px rgba(20,18,12,.035);
 }
 
-.footer {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 30px;
-  padding: 50px 5vw;
-  border-top: 1px solid var(--line);
-  background: #efede5;
-}
-
-.footer p,
-.footer small {
-  display: block;
-  margin-top: 9px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.footer-links {
-  display: flex;
-  gap: 22px;
-  color: #5e5c55;
-  font-size: 12px;
-}
-
-.footer-links a:hover {
-  color: var(--ink);
-}
 
 /* ---------- 05. Home ---------- */
 .hero {
@@ -1674,14 +1646,6 @@ body.dark-mode .data-table td {
     font-size: 43px;
   }
 
-  .footer {
-    display: block;
-  }
-
-  .footer-links {
-    flex-wrap: wrap;
-    margin: 30px 0;
-  }
 }
 
 
@@ -4213,3 +4177,209 @@ body.dark-mode .wizard-error{color:#ff9d86}
 .btn-danger{color:#a33a24;border-color:rgba(163,58,36,.35)}
 .btn-danger:hover{background:rgba(163,58,36,.1)}
 body.dark-mode .btn-danger{color:#ff9d86;border-color:rgba(255,157,134,.4)}
+
+/* Sign-up page: "Already have an account?" link above the heading */
+.signup-switch { margin: 0 0 26px; }
+
+/* Theme toggle on sign in / sign up */
+.auth-theme-toggle { position: fixed; top: 16px; right: 16px; z-index: 50; display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line, rgba(0,0,0,.15)); background: var(--card, #fff); color: inherit; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+body.dark-mode .auth-theme-toggle { background: #191b18; color: #f1efe7; border-color: rgba(255,255,255,.18); }
+
+/* Dark mode on sign in / sign up */
+body.dark-mode .login-heading h2,
+body.dark-mode .signup-heading h2 { color: #f1efe7; }
+body.dark-mode .signup-field input,
+body.dark-mode .signup-field select { background: #1d201c; color: #f1efe7; border-color: rgba(255,255,255,.14); }
+body.dark-mode .signup-field input::placeholder { color: #7d8077; }
+body.dark-mode .signup-field > span { color: #a9ac9f; }
+body.dark-mode .signup-submit.btn-dark { background: #e6ecdc; color: #171613; }
+
+/* =========================================================
+   ROLE-BASED VISIBILITY (set before first paint via body.role-*)
+   Participant mode never shows organizer-only items, and vice versa.
+   ========================================================= */
+body:not(.role-organiser) .organiser-only,
+body.role-organiser .attendee-only { display: none !important; }
+
+/* Events carousel button: longer label must fit */
+.events-page-content .btn { white-space: normal; line-height: 1.25; }
+
+/* =========================================================
+   PROFILE · ACHIEVEMENTS (redesigned)
+   ========================================================= */
+.ach-card { padding: 28px; grid-column: 1 / -1; }
+.ach-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 28px; align-items: center; }
+.ach-level { display: flex; align-items: center; gap: 18px; }
+.ach-medal { width: 72px; height: 72px; flex: none; border-radius: 22px; display: grid; place-items: center; font-size: 30px; color: #fff; box-shadow: 0 12px 30px rgba(20,18,12,.14); }
+.ach-medal.bronze { background: linear-gradient(145deg, #a8693a, #d99a62); }
+.ach-medal.silver { background: linear-gradient(145deg, #7d8793, #c5ccd3); }
+.ach-medal.gold   { background: linear-gradient(145deg, #c2951b, #f2d36b); }
+.ach-medal.legend { background: linear-gradient(145deg, #4c6a47, #c7f36a); color: #1b2a18; }
+.ach-level h3 { font: 600 28px/1.1 "Space Grotesk", sans-serif; letter-spacing: -.8px; margin: 4px 0 6px; }
+.ach-level p { font-size: 13px; line-height: 1.5; color: var(--muted); margin: 0; }
+.ach-progress-label { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.ach-progress-label strong { color: var(--ink); }
+.ach-bar { height: 12px; border-radius: 999px; background: #e5e3da; overflow: hidden; }
+.ach-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #8fa68d, #c7f36a); transition: width .6s ease; }
+.ach-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+.ach-step { text-align: center; padding: 8px 4px; border-radius: 12px; border: 1px dashed var(--line); font-size: 12px; color: var(--muted); }
+.ach-step b { display: block; font-size: 13px; color: var(--ink); }
+.ach-step.done { border-style: solid; border-color: #9bb496; background: rgba(199,243,106,.18); }
+.ach-step.current { border-color: #5f7a5a; box-shadow: 0 0 0 3px rgba(143,166,141,.2); }
+.ach-badges-head { display: flex; justify-content: space-between; align-items: baseline; margin: 26px 0 12px; gap: 12px; }
+.ach-badges-head h4 { font: 600 17px "Space Grotesk", sans-serif; margin: 0; }
+.ach-badges-head span { font-size: 12px; color: var(--muted); }
+.ach-badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.ach-badge { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.4); }
+.ach-badge-icon { width: 40px; height: 40px; flex: none; border-radius: 12px; display: grid; place-items: center; font-size: 18px; background: #e9eee6; color: #51634f; }
+.ach-badge strong { display: block; font-size: 13px; }
+.ach-badge small { display: block; margin-top: 3px; font-size: 11.5px; line-height: 1.4; color: var(--muted); }
+.ach-badge.locked { opacity: .62; }
+.ach-badge.locked .ach-badge-icon { background: #ecebe4; color: #9a988d; filter: grayscale(1); }
+.ach-badge .ach-mini { height: 5px; margin-top: 8px; border-radius: 99px; background: #e5e3da; overflow: hidden; }
+.ach-badge .ach-mini i { display: block; height: 100%; background: linear-gradient(90deg, #8fa68d, #c7f36a); }
+.ach-badge.unlocked { border-color: #9bb496; }
+body.dark-mode .ach-card { background: #191b18; border-color: #30332d; color: #f1efe7; }
+body.dark-mode .ach-bar, body.dark-mode .ach-badge .ach-mini { background: #30332d; }
+body.dark-mode .ach-badge { background: #1b1d1a; border-color: #30332d; }
+body.dark-mode .ach-badge.unlocked { border-color: #6e886a; }
+body.dark-mode .ach-badge-icon { background: #253024; color: #d5e3ce; }
+body.dark-mode .ach-badge.locked .ach-badge-icon { background: #262822; color: #6f6e66; }
+body.dark-mode .ach-step.done { background: rgba(110,136,106,.25); border-color: #6e886a; }
+@media (max-width: 760px) {
+  .ach-top { grid-template-columns: 1fr; gap: 20px; }
+  .ach-card { padding: 20px; }
+  .ach-medal { width: 58px; height: 58px; font-size: 24px; }
+}
+.profile-section-grid .profile-activity-card { grid-column: 1 / -1; }
+.ach-badge > div:last-child { flex: 1; min-width: 0; }
+
+
+/* =========================================================
+   FOOTER
+   ========================================================= */
+.footer {
+  padding: 56px 5vw 26px;
+  border-top: 1px solid var(--line);
+  background: #efede5;
+}
+.footer-main {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr 1.3fr;
+  gap: 40px;
+}
+.footer-tagline {
+  margin-top: 12px;
+  color: var(--ink);
+  font: 600 15px "Space Grotesk", sans-serif;
+  letter-spacing: -.3px;
+}
+.footer-blurb {
+  max-width: 340px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.footer-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+.footer-col h4 {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font: 600 10px "DM Sans", sans-serif;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+}
+.footer-col a,
+.footer-col span {
+  color: #5e5c55;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.footer-col a {
+  transition: color .2s, transform .2s;
+}
+.footer-col a:hover {
+  color: var(--ink);
+  transform: translateX(3px);
+}
+.footer-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 44px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.footer-bottom small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.footer-top {
+  color: #5e5c55;
+  font-size: 11px;
+  transition: color .2s;
+}
+.footer-top:hover { color: var(--ink); }
+
+body.dark-mode .footer-col a,
+body.dark-mode .footer-col span,
+body.dark-mode .footer-top { color: #aab4a5; }
+body.dark-mode .footer-col a:hover,
+body.dark-mode .footer-top:hover { color: var(--ink); }
+body.dark-mode .footer-bottom { border-color: #30332d; }
+
+@media (max-width: 900px) {
+  .footer-main { grid-template-columns: 1fr 1fr; }
+  .footer-about { grid-column: 1 / -1; }
+}
+@media (max-width: 520px) {
+  .footer { padding: 44px 6vw 24px; }
+  .footer-main { grid-template-columns: 1fr; gap: 28px; }
+  .footer-bottom { flex-direction: column; align-items: flex-start; }
+}
+
+/* Certificate templates + date gating */
+.cert-template-preview{margin:18px 0;border-radius:14px;overflow:hidden;box-shadow:var(--shadow);line-height:0}
+.cert-template-preview svg{width:100%;height:auto;display:block}
+.gate-note{margin:12px 0;padding:12px 16px;border-radius:12px;background:rgba(199,243,106,.18);border:1px dashed var(--line);font-size:13px;color:var(--muted)}
+.btn[disabled]{opacity:.45;cursor:not-allowed;pointer-events:none}
+
+/* ---------- Registration form builder + member fields ---------- */
+.registration-form select{width:100%;padding:12px 13px;border:1px solid var(--line);border-radius:11px;background:var(--white);color:var(--ink);outline:none;font:inherit;font-size:12px}
+.registration-form select:focus{border-color:#8ea58f;box-shadow:0 0 0 3px rgba(142,165,143,.12)}
+.member-stack{grid-column:1/-1;display:grid;gap:12px}
+.member-card{min-width:0;margin:0;padding:14px 16px 16px;border:1px solid var(--line);border-radius:16px;background:rgba(232,237,223,.28)}
+.member-card legend{padding:0 8px;font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+.member-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.member-fields-solo{grid-column:1/-1}
+.member-fields .form-field.full{grid-column:1/-1}
+.fb-section{margin-top:6px}
+.fb-hint{margin:2px 0 10px;color:var(--muted);font-size:11px;line-height:1.5}
+.fb-list{display:grid;gap:10px;margin-bottom:12px}
+.fb-row{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.4)}
+.fb-row.is-locked{background:rgba(232,237,223,.35)}
+.fb-row input.fb-label,.fb-row select.fb-type,.fb-row input.fb-options{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--white,#faf9f5);color:var(--ink);font:inherit;font-size:12px;outline:none}
+.fb-row input[readonly]{opacity:.75}
+.fb-row .fb-options{grid-column:1/-1}
+.fb-req{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink);white-space:nowrap}
+.fb-req input{width:auto;margin:0}
+.fb-tools{display:flex;align-items:center;gap:6px;justify-content:flex-end}
+.fb-lock{font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.fb-icon,.fb-remove{padding:7px 10px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--ink);font-size:11px;cursor:pointer}
+.fb-icon:disabled{opacity:.35;cursor:default}
+.fb-remove:hover{border-color:#c98b7b;color:#a2503c}
+.fb-add{margin-top:2px}
+.reg-details{margin-top:8px;font-size:11px}
+.reg-details summary{cursor:pointer;color:var(--muted);font-size:10px;letter-spacing:.8px;text-transform:uppercase}
+.reg-member{display:grid;gap:2px;margin-top:8px;padding:8px 10px;border-left:2px solid var(--line)}
+.reg-member span,.reg-details>span{display:block;color:var(--muted)}
+.reg-details>span{margin-top:6px}
+body.dark-mode .member-card,body.dark-mode .fb-row,body.dark-mode .fb-row.is-locked{background:rgba(255,255,255,.04)}
+body.dark-mode .fb-row input.fb-label,body.dark-mode .fb-row select.fb-type,body.dark-mode .fb-row input.fb-options,body.dark-mode .registration-form select{background:#151714;color:#f1efe7;border-color:#30332d}
+@media(max-width:720px){.member-fields{grid-template-columns:1fr}.fb-row{grid-template-columns:1fr 1fr}.fb-row .fb-label{grid-column:1/-1}.fb-tools{grid-column:1/-1;justify-content:flex-start}}

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Campusly — Sign In</title>
+  <meta name="description" content="Campusly college event management portal.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://www.gstatic.com">
+  <link rel="preconnect" href="https://firestore.googleapis.com">
+  <link rel="preload" as="script" href="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js">
+  <link rel="preload" as="script" href="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js">
+  <link rel="preload" as="script" href="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js">
+  <link rel="preload" as="script" href="firebase-config.js">
+  <link rel="preload" as="script" href="auth.js">
+  <link rel="preload" as="script" href="script.js">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="login">
+  <button id="themeToggle" class="theme-toggle auth-theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle theme"><span class="theme-icon">☾</span><span class="theme-text">Dark</span></button>
+  <div id="loadingScreen" class="loading-screen" aria-hidden="true">
+    <div class="loading-orbit loading-orbit-one"></div>
+    <div class="loading-orbit loading-orbit-two"></div>
+    <div class="loading-card">
+      <div class="loading-mark">C<span>.</span></div>
+      <p class="eyebrow">CAMPUSLY</p>
+      <h1>Loading your<br><em>campus.</em></h1>
+      <div class="loading-line"><span></span></div>
+      <small>Preparing your events & passes</small>
+    </div>
+  </div>
+
+  <section id="loginScreen" class="login-screen">
+    <div class="login-visual">
+      <div class="login-top">
+        <a class="brand brand-light" href="signin.html">CAMPUSLY<span>.</span></a>
+        <span class="eyebrow">COLLEGE EVENT PLATFORM</span>
+      </div>
+      <div class="visual-copy">
+        <p class="eyebrow">ONE PLACE. EVERY EVENT.</p>
+        <h1>Make campus<br><em>feel alive.</em></h1>
+        <p>Discover events, join communities, find a ride and keep every achievement in one beautiful place.</p>
+      </div>
+      <div class="floating-stat stat-one"><strong>48</strong><span>events this month</span></div>
+      <div class="floating-stat stat-two"><strong>2.4k</strong><span>active attendees</span></div>
+      <div class="visual-orbit"><span>TECH</span><span>CULTURE</span><span>SPORTS</span><span>ART</span></div>
+    </div>
+
+    <div class="login-panel">
+      <div class="mobile-brand"><a class="brand" href="signin.html">CAMPUSLY<span>.</span></a></div>
+      <div class="login-heading">
+        <p class="eyebrow">WELCOME BACK</p>
+        <h2>Sign in to<br><span>your campus.</span></h2>
+        <p>Use your Campusly account to continue as an attendee or organiser.</p>
+      </div>
+      <form id="signinForm" class="signup-form" onsubmit="signInUser(event)" novalidate>
+        <div class="signup-provider-row">
+          <button type="button" class="google-btn" onclick="googleAuth()"><span class="google-mark">G</span> Continue with Google</button>
+          <div class="signup-divider"><span>or sign in with email</span></div>
+        </div>
+        <div class="signup-grid">
+          <label class="signup-field full"><span>Email</span><input id="signinEmail" type="email" required autocomplete="email" placeholder="you@college.edu"></label>
+          <label class="signup-field full"><span>Password</span><input id="signinPassword" type="password" required autocomplete="current-password" placeholder="Your password"></label>
+        </div>
+        <p id="authMessage" class="auth-message" role="alert" hidden></p>
+        <button class="btn btn-dark signup-submit" type="submit">Sign in <span>→</span></button>
+        <button type="button" class="auth-link" onclick="forgotPassword()">Forgot password?</button>
+      </form>
+      <div class="auth-switch"><span>New to Campusly?</span><button type="button" onclick="window.location.href='index.html'">Create an account</button></div>
+          </div>
+  </section>
+  <script src="firebase-config.js"></script>
+<script src="auth.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
